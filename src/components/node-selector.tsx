@@ -5,6 +5,7 @@ import { useReactFlow } from "@xyflow/react";
 import {
   GlobeIcon,
   MousePointerIcon,
+  WebhookIcon,
 } from "lucide-react";
 import { useCallback } from "react";
 import { toast } from "sonner";
@@ -44,6 +45,12 @@ const triggerNodes: NodeTypeOption[] = [
     label: "Stripe Event",
     description: "Runs the flow when a Stripe Event is captured",
     icon: "/logos/stripe.svg",
+  },
+  {
+    type: NodeType.WEBHOOK_TRIGGER,
+    label: "Webhook",
+    description: "Runs the flow when any HTTP POST is received — works with Razorpay, Typeform, Shopify, and more",
+    icon: WebhookIcon,
   },
 ];
 
