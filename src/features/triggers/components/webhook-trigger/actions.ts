@@ -1,19 +1,11 @@
 "use server";
 
-import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { type Realtime } from "@inngest/realtime";
 import { webhookTriggerChannel } from "@/inngest/channels/webhook-trigger";
-import { inngest } from "@/inngest/client";
+import { safeGetToken } from "@/inngest/get-token";
 
-export type WebhookTriggerToken = Realtime.Token<
-  typeof webhookTriggerChannel,
-  ["status"]
->;
+export type WebhookTriggerToken = Realtime.Token<typeof webhookTriggerChannel, ["status"]>;
 
-export async function fetchWebhookTriggerRealtimeToken(): Promise<WebhookTriggerToken> {
-  const token = await getSubscriptionToken(inngest, {
-    channel: webhookTriggerChannel(),
-    topics: ["status"],
-  });
-
-  return token;
+export async function fetchWebhookTriggerRealtimeToken(): Promise<WebhookTriggerToken | null> {
+  return safeGetToken(webhookTriggerChannel(), ["status"]) as Promise<WebhookTriggerToken | null>;
 }

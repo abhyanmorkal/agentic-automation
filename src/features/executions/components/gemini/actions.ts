@@ -1,19 +1,11 @@
 "use server";
 
-import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { type Realtime } from "@inngest/realtime";
 import { geminiChannel } from "@/inngest/channels/gemini";
-import { inngest } from "@/inngest/client";
+import { safeGetToken } from "@/inngest/get-token";
 
-export type GeminiToken = Realtime.Token<
-  typeof geminiChannel,
-  ["status"]
->;
+export type GeminiToken = Realtime.Token<typeof geminiChannel, ["status"]>;
 
-export async function fetchGeminiRealtimeToken(): Promise<GeminiToken> {
-  const token = await getSubscriptionToken(inngest, {
-    channel: geminiChannel(),
-    topics: ["status"],
-  });
-
-  return token;
-};
+export async function fetchGeminiRealtimeToken(): Promise<GeminiToken | null> {
+  return safeGetToken(geminiChannel(), ["status"]) as Promise<GeminiToken | null>;
+}
