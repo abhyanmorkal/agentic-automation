@@ -53,9 +53,18 @@ export const sendWorkflowExecution = async (data: {
   workflowId: string;
   [key: string]: any;
 }) => {
-  return inngest.send({
-    name: "workflows/execute.workflow",
-    data,
-    id: createId(),
-  });
+  try {
+    return await inngest.send({
+      name: "workflows/execute.workflow",
+      data,
+      id: createId(),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Workflow execution failed: Inngest is not reachable. ` +
+      `Run "npm run inngest:dev" in a separate terminal to start the local Inngest server. ` +
+      `Original error: ${msg}`
+    );
+  }
 };
