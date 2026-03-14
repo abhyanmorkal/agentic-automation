@@ -9,11 +9,13 @@ import { manualTriggerChannel } from "./channels/manual-trigger";
 import { googleFormTriggerChannel } from "./channels/google-form-trigger";
 import { stripeTriggerChannel } from "./channels/stripe-trigger";
 import { webhookTriggerChannel } from "./channels/webhook-trigger";
+import { scheduleTriggerChannel } from "./channels/schedule-trigger";
 import { geminiChannel } from "./channels/gemini";
 import { openAiChannel } from "./channels/openai";
 import { anthropicChannel } from "./channels/anthropic";
 import { discordChannel } from "./channels/discord";
 import { slackChannel } from "./channels/slack";
+import { cronMatchesNow } from "./cron-utils";
 
 export const executeWorkflow = inngest.createFunction(
   { 
@@ -38,6 +40,7 @@ export const executeWorkflow = inngest.createFunction(
       googleFormTriggerChannel(),
       stripeTriggerChannel(),
       webhookTriggerChannel(),
+      scheduleTriggerChannel(),
       geminiChannel(),
       openAiChannel(),
       anthropicChannel(),
@@ -116,5 +119,51 @@ export const executeWorkflow = inngest.createFunction(
       workflowId,
       result: context,
     };
+  },
+);
+
+/**
+ * Runs every minute and fires any workflow whose SCHEDULE_TRIGGER cron
+ * expression matches the current UTC minute.
+ */
+export const scheduleDispatcher = inngest.createFunction(
+  { id: "schedule-dispatcher" },
+  { cron: "* * * * *" },
+  async ({ step }) => {
+    const scheduledNodes = await step.run("find-scheduled-nodes", async () => {
+      return prisma.node.findMany({
+        where: { type: NodeType.SCHEDULE_TRIGGER },
+        select: { id: true, workflowId: true, data: true },
+      });
+    });
+
+    const matching = scheduledNodes.filter((node) => {
+      const data = node.data as { cronExpression?: string };
+      return data.cronExpression && cronMatchesNow(data.cronExpression);
+    });
+
+    if (matching.length === 0) return { fired: 0 };
+
+    await step.sendEvent(
+      "fire-scheduled-workflows",
+      matching.map((node) => {
+        const data = node.data as { cronExpression?: string; timezone?: string };
+        return {
+          name: "workflows/execute.workflow" as const,
+          data: {
+            workflowId: node.workflowId,
+            initialData: {
+              schedule: {
+                triggeredAt: new Date().toISOString(),
+                cronExpression: data.cronExpression,
+                timezone: data.timezone || "UTC",
+              },
+            },
+          },
+        };
+      }),
+    );
+
+    return { fired: matching.length };
   },
 );

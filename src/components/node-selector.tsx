@@ -3,6 +3,7 @@
 import { createId } from "@paralleldrive/cuid2";
 import { useReactFlow } from "@xyflow/react";
 import {
+  ClockIcon,
   GlobeIcon,
   MousePointerIcon,
   WebhookIcon,
@@ -51,6 +52,12 @@ const triggerNodes: NodeTypeOption[] = [
     label: "Webhook",
     description: "Runs the flow when any HTTP POST is received — works with Razorpay, Typeform, Shopify, and more",
     icon: WebhookIcon,
+  },
+  {
+    type: NodeType.SCHEDULE_TRIGGER,
+    label: "Schedule",
+    description: "Runs the flow automatically on a cron schedule — every hour, daily, weekly, or custom",
+    icon: ClockIcon,
   },
 ];
 
