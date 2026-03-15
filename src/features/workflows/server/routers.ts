@@ -17,7 +17,19 @@ export const workflowsRouter = createTRPCRouter({
           id: input.id,
           userId: ctx.auth.user.id,
         },
+        include: { nodes: true },
       });
+
+      const hasRunnableNodes = workflow.nodes.some(
+        (node) => node.type !== NodeType.INITIAL,
+      );
+      if (!hasRunnableNodes) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Add at least one trigger or action to your workflow, then save and run again.",
+        });
+      }
 
       try {
         await sendWorkflowExecution({

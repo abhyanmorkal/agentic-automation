@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { SaveIcon } from "lucide-react";
+import { ExecuteWorkflowButton } from "./execute-workflow-button";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -37,7 +38,8 @@ export const EditorSaveButton = ({ workflowId }: { workflowId: string }) => {
   }
 
   return (
-    <div className="ml-auto">
+    <div className="ml-auto flex items-center gap-2">
+      <ExecuteWorkflowButton workflowId={workflowId} size="sm" />
       <Button size="sm" onClick={handleSave} disabled={saveWorkflow.isPending}>
         <SaveIcon className="size-4" />
         Save

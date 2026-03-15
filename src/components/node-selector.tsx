@@ -26,6 +26,15 @@ import {
 import { NodeType } from "@/generated/prisma";
 import { Separator } from "./ui/separator";
 
+/**
+ * Node types that are currently enabled (clickable). All others are shown but disabled.
+ * Change this list as you go through and enable each node.
+ */
+const ENABLED_NODE_TYPES: Set<NodeType> = new Set([
+  NodeType.FACEBOOK_LEAD_TRIGGER,
+  NodeType.GOOGLE_SHEETS,
+]);
+
 export type NodeTypeOption = {
   type: NodeType;
   label: string;
@@ -219,12 +228,28 @@ interface NodeSelectorProps {
   children: React.ReactNode;
 }
 
-function NodeItem({ nodeType, onClick }: { nodeType: NodeTypeOption; onClick: () => void }) {
+function NodeItem({
+  nodeType,
+  enabled,
+  onClick,
+}: {
+  nodeType: NodeTypeOption;
+  enabled: boolean;
+  onClick: () => void;
+}) {
   const Icon = nodeType.icon;
   return (
     <div
-      className="w-full justify-start h-auto py-4 px-4 rounded-none cursor-pointer border-l-2 border-transparent hover:border-l-primary hover:bg-accent/30 transition-colors"
-      onClick={onClick}
+      role="button"
+      aria-disabled={!enabled}
+      tabIndex={enabled ? 0 : -1}
+      className={`w-full justify-start h-auto py-4 px-4 rounded-none border-l-2 transition-colors ${
+        enabled
+          ? "cursor-pointer border-transparent hover:border-l-primary hover:bg-accent/30"
+          : "cursor-not-allowed border-transparent opacity-60 pointer-events-none"
+      }`}
+      onClick={enabled ? onClick : undefined}
+      onKeyDown={enabled ? (e) => e.key === "Enter" && onClick() : undefined}
     >
       <div className="flex items-center gap-4 w-full overflow-hidden">
         {typeof Icon === "string" ? (
@@ -235,6 +260,9 @@ function NodeItem({ nodeType, onClick }: { nodeType: NodeTypeOption; onClick: ()
         <div className="flex flex-col items-start text-left min-w-0">
           <span className="font-medium text-sm">{nodeType.label}</span>
           <span className="text-xs text-muted-foreground line-clamp-2">{nodeType.description}</span>
+          {!enabled && (
+            <span className="text-[10px] text-muted-foreground/80 mt-0.5">Coming soon</span>
+          )}
         </div>
       </div>
     </div>
@@ -288,6 +316,7 @@ export function NodeSelector({ open, onOpenChange, children }: NodeSelectorProps
                 <NodeItem
                   key={nodeType.type}
                   nodeType={nodeType}
+                  enabled={ENABLED_NODE_TYPES.has(nodeType.type)}
                   onClick={() => handleNodeSelect(nodeType)}
                 />
               ))}
