@@ -4,8 +4,11 @@
 
 import * as Sentry from "@sentry/nextjs";
 
+const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
+
 Sentry.init({
-  dsn: "https://f1a2853e6bb4b74c72976cd5c3b37dd9@o4507629901053952.ingest.de.sentry.io/4510150041337936",
+  dsn,
+  enabled: !!dsn,
 
   integrations: [
     // Add the Vercel AI SDK integration to sentry.server.config.ts

@@ -18,9 +18,8 @@ export default withSentryConfig(nextConfig, {
   // For all available options, see:
   // https://www.npmjs.com/package/@sentry/webpack-plugin#options
 
-  org: "enra-doo",
-
-  project: "nodebase",
+  org: process.env.SENTRY_ORG ?? "enra-doo",
+  project: process.env.SENTRY_PROJECT ?? "nodebase",
 
   // Only print logs for uploading source maps in CI
   silent: !process.env.CI,

@@ -40,11 +40,12 @@ export default function Page() {
         </h1>
 
         <p className="description">
-          Click the button below, and view the sample error on the Sentry <a target="_blank" href="https://enra-doo.sentry.io/issues/?project=4510150041337936">Issues Page</a>.
-          For more details about setting up Sentry, <a target="_blank"
-           href="https://docs.sentry.io/platforms/javascript/guides/nextjs/">read our docs</a>.
+          Click a button below to send a test error. Then check your Sentry{" "}
+          <a target="_blank" href="https://sentry.io/issues/">Issues</a>.{" "}
+          <a target="_blank" href="https://docs.sentry.io/platforms/javascript/guides/nextjs/">Docs</a>.
         </p>
 
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px", alignItems: "center" }}>
         <button
           type="button"
           onClick={async () => {
@@ -61,10 +62,20 @@ export default function Page() {
           }}
           disabled={!isConnected}
         >
-          <span>
-            Throw Sample Error
-          </span>
+          <span>Throw sample error (frontend + API)</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            (window as unknown as { myUndefinedFunction?: () => void }).myUndefinedFunction!();
+          }}
+          disabled={!isConnected}
+          style={{ background: "transparent", color: "inherit", border: "1px dashed currentColor" } as React.CSSProperties}
+        >
+          <span style={{ background: "transparent" }}>Or trigger undefined function</span>
+        </button>
+        </div>
 
         {hasSentError ? (
           <p className="success">
