@@ -15,6 +15,18 @@ import { openAiChannel } from "./channels/openai";
 import { anthropicChannel } from "./channels/anthropic";
 import { discordChannel } from "./channels/discord";
 import { slackChannel } from "./channels/slack";
+import { telegramChannel } from "./channels/telegram";
+import { notionChannel } from "./channels/notion";
+import { airtableChannel } from "./channels/airtable";
+import { sendEmailChannel } from "./channels/send-email";
+import { sendSmsChannel } from "./channels/send-sms";
+import { gmailChannel } from "./channels/gmail";
+import { googleSheetsChannel } from "./channels/google-sheets";
+import { googleDriveChannel } from "./channels/google-drive";
+import { whatsappChannel } from "./channels/whatsapp";
+import { instagramChannel } from "./channels/instagram";
+import { facebookPageChannel } from "./channels/facebook-page";
+import { mcpToolChannel } from "./channels/mcp-tool";
 import { cronMatchesNow } from "./cron-utils";
 
 export const executeWorkflow = inngest.createFunction(
@@ -46,6 +58,18 @@ export const executeWorkflow = inngest.createFunction(
       anthropicChannel(),
       discordChannel(),
       slackChannel(),
+      telegramChannel(),
+      notionChannel(),
+      airtableChannel(),
+      sendEmailChannel(),
+      sendSmsChannel(),
+      gmailChannel(),
+      googleSheetsChannel(),
+      googleDriveChannel(),
+      whatsappChannel(),
+      instagramChannel(),
+      facebookPageChannel(),
+      mcpToolChannel(),
     ],
   },
   async ({ event, step, publish }) => {

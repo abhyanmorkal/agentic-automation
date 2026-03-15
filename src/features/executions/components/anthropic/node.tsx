@@ -2,6 +2,7 @@
 
 import { useReactFlow, type Node, type NodeProps } from "@xyflow/react";
 import { memo, useState } from "react";
+import { Anthropic } from "@lobehub/icons";
 import { BaseExecutionNode } from "../base-execution-node";
 import { AnthropicDialog, AnthropicFormValues } from "./dialog";
 import { useNodeStatus } from "../../hooks/use-node-status";
@@ -61,7 +62,7 @@ export const AnthropicNode = memo((props: NodeProps<AnthropicNodeType>) => {
       <BaseExecutionNode
         {...props}
         id={props.id}
-        icon="/logos/anthropic.svg"
+        icon={Anthropic}
         name="Anthropic"
         status={nodeStatus}
         description={description}

@@ -2,6 +2,7 @@
 
 import { useReactFlow, type Node, type NodeProps } from "@xyflow/react";
 import { memo, useState } from "react";
+import { OpenAI } from "@lobehub/icons";
 import { BaseExecutionNode } from "../base-execution-node";
 import { OpenAiDialog, OpenAiFormValues } from "./dialog";
 import { useNodeStatus } from "../../hooks/use-node-status";
@@ -61,7 +62,7 @@ export const OpenAiNode = memo((props: NodeProps<OpenAiNodeType>) => {
       <BaseExecutionNode
         {...props}
         id={props.id}
-        icon="/logos/openai.svg"
+        icon={OpenAI}
         name="OpenAi"
         status={nodeStatus}
         description={description}

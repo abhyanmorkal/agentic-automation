@@ -3,14 +3,17 @@
 import { type NodeProps, Position, useReactFlow } from "@xyflow/react";
 import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
+import type { ComponentType } from "react";
 import { memo, type ReactNode } from "react";
 import { BaseNode, BaseNodeContent } from "@/components/react-flow/base-node";
 import { BaseHandle } from "@/components/react-flow/base-handle";
 import { WorkflowNode } from "@/components/workflow-node";
 import { type NodeStatus, NodeStatusIndicator } from "@/components/react-flow/node-status-indicator";
 
+type AnyIconComponent = LucideIcon | ComponentType<{ className?: string; size?: number; style?: React.CSSProperties }>;
+
 interface BaseExecutionNodeProps extends NodeProps {
-  icon: LucideIcon | string;
+  icon: AnyIconComponent | string;
   name: string;
   description?: string;
   children?: ReactNode;
@@ -61,7 +64,7 @@ export const BaseExecutionNode = memo(
               {typeof Icon === "string" ? (
                 <Image src={Icon} alt={name} width={16} height={16} />
               ) : (
-                <Icon className="size-4 text-muted-foreground" />
+                <Icon size={16} className="text-muted-foreground" />
               )}
               {children}
               <BaseHandle

@@ -10,7 +10,7 @@ export function cronMatchesNow(expression: string): boolean {
     // Set seconds/ms to 0 so we compare at minute granularity
     now.setSeconds(0, 0);
 
-    const interval = CronExpressionParser.parse(expression, { utc: true });
+    const interval = CronExpressionParser.parse(expression);
     const prev = interval.prev().toDate();
     prev.setSeconds(0, 0);
 
@@ -25,7 +25,7 @@ export function cronMatchesNow(expression: string): boolean {
  */
 export function getNextRuns(expression: string, count = 5): Date[] {
   try {
-    const interval = CronExpressionParser.parse(expression, { utc: true });
+    const interval = CronExpressionParser.parse(expression);
     const runs: Date[] = [];
     for (let i = 0; i < count; i++) {
       runs.push(interval.next().toDate());
@@ -41,7 +41,7 @@ export function getNextRuns(expression: string, count = 5): Date[] {
  */
 export function validateCron(expression: string): string | null {
   try {
-    CronExpressionParser.parse(expression, { utc: true });
+    CronExpressionParser.parse(expression);
     return null;
   } catch (err) {
     return err instanceof Error ? err.message : "Invalid cron expression";

@@ -18,7 +18,9 @@ import { useCredentialsParams } from "../hooks/use-credentials-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
 import type { Credential } from "@/generated/prisma";
 import { CredentialType } from "@/generated/prisma";
+import { Anthropic, Gemini, Google, Meta, Notion, OpenAI } from "@lobehub/icons";
 import Image from "next/image";
+import type { ComponentType } from "react";
 
 export const CredentialsSearch = () => {
   const [params, setParams] = useCredentialsParams();
@@ -114,10 +116,20 @@ export const CredentialsEmpty = () => {
   );
 };
 
-const credentialLogos: Record<CredentialType, string> = {
-  [CredentialType.OPENAI]: "/logos/openai.svg",
-  [CredentialType.ANTHROPIC]: "/logos/anthropic.svg",
-  [CredentialType.GEMINI]: "/logos/gemini.svg",
+type LobeIconComponent = ComponentType<{ size?: number; className?: string }>;
+type CredentialLogoValue = string | LobeIconComponent;
+
+const credentialLogos: Record<CredentialType, CredentialLogoValue> = {
+  [CredentialType.OPENAI]: OpenAI,
+  [CredentialType.ANTHROPIC]: Anthropic,
+  [CredentialType.GEMINI]: Gemini.Color,
+  [CredentialType.TELEGRAM_BOT_TOKEN]: "/logos/telegram.svg",
+  [CredentialType.NOTION_API_KEY]: Notion,
+  [CredentialType.AIRTABLE_API_KEY]: "/logos/airtable.svg",
+  [CredentialType.RESEND_API_KEY]: "/logos/gmail.svg",
+  [CredentialType.TWILIO]: "/logos/telegram.svg",
+  [CredentialType.GOOGLE_OAUTH]: Google.Color,
+  [CredentialType.META_ACCESS_TOKEN]: Meta.Color,
 };
 
 export const CredentialItem = ({
@@ -131,7 +143,8 @@ export const CredentialItem = ({
     removeCredential.mutate({ id: data.id });
   };
 
-  const logo = credentialLogos[data.type] || "/logos/openai.svg";
+  const logo = credentialLogos[data.type] ?? "/logos/openai.svg";
+  const LogoIcon = typeof logo !== "string" ? logo : null;
 
   return (
     <EntityItem
@@ -146,7 +159,11 @@ export const CredentialItem = ({
       }
       image={
         <div className="size-8 flex items-center justify-center">
-          <Image src={logo} alt={data.type} width={20} height={20} />
+          {LogoIcon ? (
+            <LogoIcon size={20} />
+          ) : (
+            <Image src={logo as string} alt={data.type} width={20} height={20} />
+          )}
         </div>
       }
       onRemove={handleRemove}
