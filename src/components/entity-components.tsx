@@ -1,4 +1,5 @@
-import { AlertTriangleIcon, Loader2Icon, MoreVerticalIcon, PackageOpenIcon, PlusIcon, SearchIcon, TrashIcon } from "lucide-react";
+import { AlertTriangleIcon, MoreVerticalIcon, PackageOpenIcon, PlusIcon, SearchIcon, TrashIcon } from "lucide-react";
+import { LoadingSpinnerScreen } from "@/components/loading-spinner-screen";
 import { Button } from "./ui/button";
 import Link from "next/link";
 import { Input } from "./ui/input";
@@ -179,14 +180,7 @@ export const LoadingView = ({
   message,
 }: StateViewProps) => {
   return (
-    <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-4">
-      <Loader2Icon className="size-6 animate-spin text-primary" />
-      {!!message && (
-        <p className="text-sm text-muted-foreground">
-          {message}
-        </p>
-      )}
-    </div>
+    <LoadingSpinnerScreen message={message} fullScreen={false} />
   );
 };
 

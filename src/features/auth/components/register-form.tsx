@@ -2,8 +2,9 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import Image from "next/image";
-import Link from "next/link";
+import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
+import { LoadingSpinnerScreen } from "@/components/loading-spinner-screen";
 
 const registerSchema = z.object({
   email: z.email("Please enter a valid email address"),
@@ -37,9 +39,13 @@ const registerSchema = z.object({
 });
 
 type RegisterFormValues = z.infer<typeof registerSchema>;
+type SocialProvider = "github" | "google" | null;
 
 export function RegisterForm() {
   const router = useRouter();
+  const [socialLoading, setSocialLoading] = useState<SocialProvider>(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [isNavigatingTo, setIsNavigatingTo] = useState<"login" | null>(null);
 
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
@@ -51,6 +57,7 @@ export function RegisterForm() {
   });
 
   const signInGithub = async () => {
+    setSocialLoading("github");
     await authClient.signIn.social({
       provider: "github",
     }, {
@@ -59,11 +66,13 @@ export function RegisterForm() {
       },
       onError: () => {
         toast.error("Something went wrong");
+        setSocialLoading(null);
       },
     });
   };
 
   const signInGoogle = async () => {
+    setSocialLoading("google");
     await authClient.signIn.social({
       provider: "google",
     }, {
@@ -72,6 +81,7 @@ export function RegisterForm() {
       },
       onError: () => {
         toast.error("Something went wrong");
+        setSocialLoading(null);
       },
     });
   };
@@ -86,6 +96,7 @@ export function RegisterForm() {
       },
       {
         onSuccess: () => {
+          setIsRedirecting(true);
           router.push("/");
         },
         onError: (ctx) => {
@@ -96,6 +107,17 @@ export function RegisterForm() {
   };
 
   const isPending = form.formState.isSubmitting;
+  const anyLoading = isPending || socialLoading !== null || isRedirecting;
+
+  const handleGoToLogin = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsNavigatingTo("login");
+    router.push("/login");
+  };
+
+  if (isNavigatingTo) {
+    return <LoadingSpinnerScreen fullScreen />;
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -118,20 +140,28 @@ export function RegisterForm() {
                     variant="outline"
                     className="w-full"
                     type="button"
-                    disabled={isPending}
+                    disabled={anyLoading}
                   >
-                    <Image alt="GitHub" src="/logos/github.svg" width={20} height={20} />
-                    Continue with GitHub
+                    {socialLoading === "github" ? (
+                      <Loader2Icon className="size-5 animate-spin" />
+                    ) : (
+                      <Image alt="GitHub" src="/logos/github.svg" width={20} height={20} />
+                    )}
+                    {socialLoading === "github" ? "Signing up..." : "Continue with GitHub"}
                   </Button>
                   <Button
                     onClick={signInGoogle}
                     variant="outline"
                     className="w-full"
                     type="button"
-                    disabled={isPending}
+                    disabled={anyLoading}
                   >
-                    <Image alt="Google" src="/logos/google.svg" width={20} height={20} />
-                    Continue with Google
+                    {socialLoading === "google" ? (
+                      <Loader2Icon className="size-5 animate-spin" />
+                    ) : (
+                      <Image alt="Google" src="/logos/google.svg" width={20} height={20} />
+                    )}
+                    {socialLoading === "google" ? "Signing up..." : "Continue with Google"}
                   </Button>
                 </div>
                 <div className="grid gap-6">
@@ -186,15 +216,31 @@ export function RegisterForm() {
                       </FormItem>
                     )}
                   />
-                  <Button type="submit" className="w-full" disabled={isPending}>
-                    Sign up
+                  <Button type="submit" className="w-full" disabled={anyLoading}>
+                    {isRedirecting ? (
+                      <>
+                        <Loader2Icon className="size-4 animate-spin" />
+                        Redirecting...
+                      </>
+                    ) : isPending ? (
+                      <>
+                        <Loader2Icon className="size-4 animate-spin" />
+                        Creating account...
+                      </>
+                    ) : (
+                      "Sign up"
+                    )}
                   </Button>
                 </div>
                 <div className="text-center text-sm">
                   Already have an account?{" "}
-                  <Link href="/login" className="underline underline-offset-4">
+                  <a
+                    href="/login"
+                    onClick={handleGoToLogin}
+                    className="underline underline-offset-4 cursor-pointer"
+                  >
                     Login
-                  </Link>
+                  </a>
                 </div>
               </div>
             </form>
