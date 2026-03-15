@@ -32,9 +32,11 @@ export const workflowsRouter = createTRPCRouter({
       }
 
       try {
-        await sendWorkflowExecution({
-          workflowId: input.id,
-        });
+        // Manual execution always runs regardless of active/paused state
+        await sendWorkflowExecution(
+          { workflowId: input.id },
+          { checkActive: false },
+        );
       } catch (err) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -145,6 +147,14 @@ export const workflowsRouter = createTRPCRouter({
         data: { name: input.name },
       });
     }),
+  toggle: protectedProcedure
+    .input(z.object({ id: z.string(), isActive: z.boolean() }))
+    .mutation(({ ctx, input }) => {
+      return prisma.workflow.update({
+        where: { id: input.id, userId: ctx.auth.user.id },
+        data: { isActive: input.isActive },
+      });
+    }),
   getOne: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -173,6 +183,7 @@ export const workflowsRouter = createTRPCRouter({
       return {
         id: workflow.id,
         name: workflow.name,
+        isActive: workflow.isActive,
         nodes,
         edges,
       };

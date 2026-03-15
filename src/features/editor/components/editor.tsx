@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { 
   ReactFlow, 
   applyNodeChanges, 
@@ -34,6 +34,9 @@ export const EditorError = () => {
   return <ErrorView message="Error loading editor" />;
 };
 
+const applyAnimation = (edges: Edge[], animated: boolean): Edge[] =>
+  edges.map((e) => ({ ...e, animated }));
+
 export const Editor = ({ workflowId }: { workflowId: string }) => {
   const { 
     data: workflow
@@ -42,7 +45,14 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
   const setEditor = useSetAtom(editorAtom);
 
   const [nodes, setNodes] = useState<Node[]>(workflow.nodes);
-  const [edges, setEdges] = useState<Edge[]>(workflow.edges);
+  const [edges, setEdges] = useState<Edge[]>(
+    applyAnimation(workflow.edges, workflow.isActive),
+  );
+
+  // Sync edge animation whenever the Live/Paused toggle changes
+  useEffect(() => {
+    setEdges((prev) => applyAnimation(prev, workflow.isActive));
+  }, [workflow.isActive]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes((nodesSnapshot) => applyNodeChanges(changes, nodesSnapshot)),
@@ -53,8 +63,9 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
     [],
   );
   const onConnect = useCallback(
-    (params: Connection) => setEdges((edgesSnapshot) => addEdge(params, edgesSnapshot)),
-    [],
+    (params: Connection) =>
+      setEdges((prev) => addEdge({ ...params, animated: workflow.isActive }, prev)),
+    [workflow.isActive],
   );
 
   return (

@@ -1,7 +1,9 @@
 import type { Realtime } from "@inngest/realtime";
 import { useInngestSubscription } from "@inngest/realtime/hooks";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NodeStatus } from "@/components/react-flow/node-status-indicator";
+
+const RETRY_DELAY_MS = 15000;
 
 interface UseNodeStatusOptions {
   nodeId: string;
@@ -18,21 +20,37 @@ export function useNodeStatus({
 }: UseNodeStatusOptions) {
   const [status, setStatus] = useState<NodeStatus>("initial");
   const [realtimeEnabled, setRealtimeEnabled] = useState(true);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Wrap refreshToken to catch 401/connection errors silently in dev
+  // Wrap refreshToken to catch 401/connection errors and auto-retry after a delay
   const safeRefreshToken = useCallback(async () => {
     try {
       const token = await refreshToken();
       if (!token) {
         setRealtimeEnabled(false);
+        retryTimerRef.current = setTimeout(
+          () => setRealtimeEnabled(true),
+          RETRY_DELAY_MS,
+        );
         return new Promise<Realtime.Subscribe.Token>(() => {});
       }
       return token;
     } catch {
       setRealtimeEnabled(false);
+      retryTimerRef.current = setTimeout(
+        () => setRealtimeEnabled(true),
+        RETRY_DELAY_MS,
+      );
       return new Promise<Realtime.Subscribe.Token>(() => {});
     }
   }, [refreshToken]);
+
+  // Clear the retry timer on unmount
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
+  }, []);
 
   const { data } = useInngestSubscription({
     refreshToken: safeRefreshToken as () => Promise<Realtime.Subscribe.Token>,

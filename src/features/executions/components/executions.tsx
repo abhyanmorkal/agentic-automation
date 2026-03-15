@@ -11,11 +11,12 @@ import {
   ErrorView,
   LoadingView
 } from "@/components/entity-components";
-import { useSuspenseExecutions } from "../hooks/use-executions"
+import { useRetryExecution, useSuspenseExecutions } from "../hooks/use-executions"
 import { useExecutionsParams } from "../hooks/use-executions-params";
 import type { Execution } from "@/generated/prisma";
 import { ExecutionStatus } from "@/generated/prisma";
-import { CheckCircle2Icon, ClockIcon, Loader2Icon, XCircleIcon } from "lucide-react";
+import { CheckCircle2Icon, ClockIcon, Loader2Icon, RefreshCwIcon, XCircleIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export const ExecutionsList = () => {
   const executions = useSuspenseExecutions();
@@ -111,6 +112,8 @@ export const ExecutionItem = ({
     };
   };
 }) => {
+  const retryExecution = useRetryExecution();
+
   const duration = data.completedAt
     ? Math.round(
       (new Date(data.completedAt).getTime() - new Date(data.startedAt).getTime()) / 1000,
@@ -134,6 +137,23 @@ export const ExecutionItem = ({
         <div className="size-8 flex items-center justify-center">
           {getStatusIcon(data.status)}
         </div>
+      }
+      actions={
+        data.status === ExecutionStatus.FAILED ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={retryExecution.isPending}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              retryExecution.mutate({ id: data.id });
+            }}
+          >
+            <RefreshCwIcon className="size-3" />
+            Retry
+          </Button>
+        ) : undefined
       }
     />
   )

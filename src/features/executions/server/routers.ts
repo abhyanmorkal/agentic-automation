@@ -2,8 +2,30 @@ import prisma from "@/lib/db";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import z from "zod";
 import { PAGINATION } from "@/config/constants";
+import { sendWorkflowExecution } from "@/inngest/utils";
+import { TRPCError } from "@trpc/server";
 
 export const executionsRouter = createTRPCRouter({
+  retry: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const execution = await prisma.execution.findUniqueOrThrow({
+        where: { id: input.id, workflow: { userId: ctx.auth.user.id } },
+        select: { workflowId: true, initialData: true },
+      });
+
+      try {
+        await sendWorkflowExecution({
+          workflowId: execution.workflowId,
+          initialData: (execution.initialData as Record<string, unknown>) ?? undefined,
+        });
+      } catch (err) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: err instanceof Error ? err.message : "Failed to retry execution",
+        });
+      }
+    }),
   getOne: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => {

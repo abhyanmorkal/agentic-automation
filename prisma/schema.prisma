@@ -106,6 +106,7 @@ enum CredentialType {
 model Workflow {
   id String @id @default(cuid())
   name String
+  isActive Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -205,5 +206,6 @@ model Execution {
 
   inngestEventId String @unique
 
+  initialData Json?
   output Json?
 }

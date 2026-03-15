@@ -87,6 +87,7 @@ export const executeWorkflow = inngest.createFunction(
         data: {
           workflowId,
           inngestEventId,
+          initialData: event.data.initialData ?? null,
         },
       });
     });

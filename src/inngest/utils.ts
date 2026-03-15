@@ -2,6 +2,7 @@ import { Connection, Node } from "@/generated/prisma";
 import toposort from "toposort";
 import { inngest } from "./client";
 import { createId } from "@paralleldrive/cuid2";
+import prisma from "@/lib/db";
 
 export const topologicalSort = (
   nodes: Node[],
@@ -49,10 +50,28 @@ export const topologicalSort = (
   return sortedNodeIds.map((id) => nodeMap.get(id)!).filter(Boolean);
 };
 
-export const sendWorkflowExecution = async (data: {
-  workflowId: string;
-  [key: string]: any;
-}) => {
+/**
+ * Sends a workflow execution event to Inngest.
+ * @param data - The workflow ID and any initial trigger data.
+ * @param options.checkActive - When true (default for automatic triggers),
+ *   silently skips the execution if the workflow is paused. Set to false for
+ *   manual executions so the user can always test regardless of active state.
+ */
+export const sendWorkflowExecution = async (
+  data: { workflowId: string; [key: string]: any },
+  options: { checkActive?: boolean } = { checkActive: true },
+) => {
+  if (options.checkActive !== false) {
+    const workflow = await prisma.workflow.findUnique({
+      where: { id: data.workflowId },
+      select: { isActive: true },
+    });
+
+    if (!workflow?.isActive) {
+      return null;
+    }
+  }
+
   try {
     return await inngest.send({
       name: "workflows/execute.workflow",

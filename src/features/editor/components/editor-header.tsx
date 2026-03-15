@@ -12,11 +12,57 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSuspenseWorkflow, useUpdateWorkflow, useUpdateWorkflowName } from "@/features/workflows/hooks/use-workflows";
+import { useSuspenseWorkflow, useToggleWorkflow, useUpdateWorkflow, useUpdateWorkflowName } from "@/features/workflows/hooks/use-workflows";
 import { useAtomValue } from "jotai";
 import { editorAtom } from "../store/atoms";
+
+export const WorkflowActiveToggle = ({ workflowId }: { workflowId: string }) => {
+  const { data: workflow } = useSuspenseWorkflow(workflowId);
+  const toggleWorkflow = useToggleWorkflow();
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-2 cursor-default select-none">
+            {workflow.isActive ? (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-green-600">
+                <span className="relative flex size-2">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-green-500 opacity-75" />
+                  <span className="relative inline-flex size-2 rounded-full bg-green-500" />
+                </span>
+                Live
+              </span>
+            ) : (
+              <span className="text-xs font-medium text-muted-foreground">Paused</span>
+            )}
+            <Switch
+              checked={workflow.isActive}
+              disabled={toggleWorkflow.isPending}
+              onCheckedChange={(checked) =>
+                toggleWorkflow.mutate({ id: workflowId, isActive: checked })
+              }
+            />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-[220px] text-center text-xs">
+          {workflow.isActive
+            ? "Workflow is live. Triggers like Facebook Lead Ads will automatically run this workflow when new data arrives."
+            : "Workflow is paused. Incoming triggers will be ignored until you switch it back to Live."}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
 
 export const EditorSaveButton = ({ workflowId }: { workflowId: string }) => {
   const editor = useAtomValue(editorAtom);
@@ -38,7 +84,9 @@ export const EditorSaveButton = ({ workflowId }: { workflowId: string }) => {
   }
 
   return (
-    <div className="ml-auto flex items-center gap-2">
+    <div className="ml-auto flex items-center gap-3">
+      <WorkflowActiveToggle workflowId={workflowId} />
+      <div className="w-px h-5 bg-border" />
       <ExecuteWorkflowButton workflowId={workflowId} size="sm" />
       <Button size="sm" onClick={handleSave} disabled={saveWorkflow.isPending}>
         <SaveIcon className="size-4" />

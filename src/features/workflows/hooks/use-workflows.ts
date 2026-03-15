@@ -114,6 +114,29 @@ export const useUpdateWorkflow = () => {
 };
 
 /**
+ * Hook to toggle workflow active/inactive state
+ */
+export const useToggleWorkflow = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+
+  return useMutation(
+    trpc.workflows.toggle.mutationOptions({
+      onSuccess: (data) => {
+        toast.success(`Workflow "${data.name}" ${data.isActive ? "activated" : "paused"}`);
+        queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
+        queryClient.invalidateQueries(
+          trpc.workflows.getOne.queryOptions({ id: data.id }),
+        );
+      },
+      onError: (error) => {
+        toast.error(`Failed to update workflow: ${error.message}`);
+      },
+    }),
+  );
+};
+
+/**
  * Hook to execute a workflow
  */
 export const useExecuteWorkflow = () => {
