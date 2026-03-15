@@ -57,14 +57,15 @@ export const AppSidebar = () => {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <SidebarMenuItem>
-          <SidebarMenuButton asChild className="gap-x-4 h-10 px-4">
+          <SidebarMenuButton asChild className="h-12">
             <Link href="/" prefetch>
-              <Image src="/logos/logo.svg" alt="Litchoo" width={30} height={30} />
-              <span className="font-semibold text-sm">Litchoo</span>
+              <Image src="/logos/logo.svg" alt="Litchoo" width={49} height={50} />
+              <span className="text-4xl font-bold italic">Litchoo</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarHeader>
+          <hr className="border-border" />
       <SidebarContent>
         {menuItems.map((group) => (
           <SidebarGroup key={group.title}>

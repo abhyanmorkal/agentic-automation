@@ -1,5 +1,9 @@
+"use client";
+
 import { AlertTriangleIcon, MoreVerticalIcon, PackageOpenIcon, PlusIcon, SearchIcon, TrashIcon } from "lucide-react";
+import { useEffect } from "react";
 import { LoadingSpinnerScreen } from "@/components/loading-spinner-screen";
+import { usePageHeader } from "@/components/page-header-context";
 import { Button } from "./ui/button";
 import Link from "next/link";
 import { Input } from "./ui/input";
@@ -47,7 +51,7 @@ export const EntityHeader = ({
   isCreating,
 }: EntityHeaderProps) => {
   return (
-    <div className="flex flex-row items-center justify-between gap-x-4">
+    <div className="flex w-full flex-row items-center justify-between gap-x-4">
       <div className="flex flex-col">
         <h1 className="text-lg md:text-xl font-semibold">{title}</h1>
         {description && (
@@ -94,10 +98,20 @@ export const EntityContainer = ({
   search,
   pagination,
 }: EntityContainerProps) => {
+  const pageHeader = usePageHeader();
+
+  useEffect(() => {
+    if (!pageHeader) return;
+    pageHeader.setHeaderContent(header ?? null);
+    return () => pageHeader.setHeaderContent(null);
+  }, [pageHeader, header]);
+
+  const headerInBody = !pageHeader ? header : null;
+
   return (
-    <div className="p-4 md:px-10 md:py-6 h-full">
-      <div className="mx-auto max-w-screen-xl w-full flex flex-col gap-y-8 h-full">
-        {header}
+    <div className="p-4 h-full">
+      <div className="mx-auto w-full flex flex-col gap-y-8 h-full">
+        {headerInBody}
         <div className="flex flex-col gap-y-4 h-full">
           {search}
           {children}
