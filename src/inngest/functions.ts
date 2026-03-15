@@ -27,6 +27,7 @@ import { whatsappChannel } from "./channels/whatsapp";
 import { instagramChannel } from "./channels/instagram";
 import { facebookPageChannel } from "./channels/facebook-page";
 import { mcpToolChannel } from "./channels/mcp-tool";
+import { facebookLeadTriggerChannel } from "./channels/facebook-lead-trigger";
 import { cronMatchesNow } from "./cron-utils";
 
 export const executeWorkflow = inngest.createFunction(
@@ -70,6 +71,7 @@ export const executeWorkflow = inngest.createFunction(
       instagramChannel(),
       facebookPageChannel(),
       mcpToolChannel(),
+      facebookLeadTriggerChannel(),
     ],
   },
   async ({ event, step, publish }) => {

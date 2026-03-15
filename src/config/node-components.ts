@@ -24,6 +24,7 @@ import { GoogleDriveNode } from "@/features/executions/components/google-drive/n
 import { WhatsAppNode } from "@/features/executions/components/whatsapp/node";
 import { InstagramNode } from "@/features/executions/components/instagram/node";
 import { FacebookPageNode } from "@/features/executions/components/facebook-page/node";
+import { FacebookLeadTriggerNode } from "@/features/triggers/components/facebook-lead-trigger/node";
 import { McpToolNode } from "@/features/executions/components/mcp-tool/node";
 
 export const nodeComponents = {
@@ -50,6 +51,7 @@ export const nodeComponents = {
   [NodeType.WHATSAPP]: WhatsAppNode,
   [NodeType.INSTAGRAM]: InstagramNode,
   [NodeType.FACEBOOK_PAGE]: FacebookPageNode,
+  [NodeType.FACEBOOK_LEAD_TRIGGER]: FacebookLeadTriggerNode,
   [NodeType.MCP_TOOL]: McpToolNode,
 } as const satisfies NodeTypes;
 

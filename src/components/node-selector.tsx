@@ -9,6 +9,7 @@ import {
   MousePointerIcon,
   PlugIcon,
   SmartphoneIcon,
+  UsersIcon,
   WebhookIcon,
 } from "lucide-react";
 import { Anthropic, Gemini, Google, Meta, Notion, OpenAI } from "@lobehub/icons";
@@ -62,6 +63,12 @@ const triggerNodes: NodeTypeOption[] = [
     label: "Schedule",
     description: "Runs the flow automatically on a cron schedule — every hour, daily, weekly, or custom",
     icon: ClockIcon,
+  },
+  {
+    type: NodeType.FACEBOOK_LEAD_TRIGGER,
+    label: "Facebook Lead Ads",
+    description: "Runs the flow when a new lead is submitted via a Facebook Lead Ads form",
+    icon: Meta.Color,
   },
 ];
 

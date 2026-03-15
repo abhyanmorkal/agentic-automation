@@ -22,6 +22,7 @@ import { googleDriveExecutor } from "../components/google-drive/executor";
 import { whatsappExecutor } from "../components/whatsapp/executor";
 import { instagramExecutor } from "../components/instagram/executor";
 import { facebookPageExecutor } from "../components/facebook-page/executor";
+import { facebookLeadTriggerExecutor } from "@/features/triggers/components/facebook-lead-trigger/executor";
 import { mcpToolExecutor } from "../components/mcp-tool/executor";
 
 export const executorRegistry: Record<NodeType, NodeExecutor> = {
@@ -48,6 +49,7 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.WHATSAPP]: whatsappExecutor,
   [NodeType.INSTAGRAM]: instagramExecutor,
   [NodeType.FACEBOOK_PAGE]: facebookPageExecutor,
+  [NodeType.FACEBOOK_LEAD_TRIGGER]: facebookLeadTriggerExecutor,
   [NodeType.MCP_TOOL]: mcpToolExecutor,
 };
 
