@@ -24,6 +24,8 @@ import {
   fetchGoogleSheets,
   fetchGoogleSpreadsheets,
 } from "./actions";
+import { VariablesHint } from "../variables-hint";
+import type { VariableTree } from "@/features/executions/lib/variable-tree";
 
 const formSchema = z.object({
   variableName: z.string().min(1, "Variable name is required").regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
@@ -44,9 +46,16 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: GoogleSheetsFormValues) => void;
   defaultValues?: Partial<GoogleSheetsFormValues>;
+  availableVariables?: VariableTree;
 }
 
-export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues = {} }: Props) => {
+export const GoogleSheetsDialog = ({
+  open,
+  onOpenChange,
+  onSubmit,
+  defaultValues = {},
+  availableVariables = {},
+}: Props) => {
   const {
     data: credentials,
     isLoading,
@@ -65,7 +74,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
       action: defaultValues.action ?? "append",
       values: defaultValues.values ?? '[["Value 1", "Value 2"]]',
       columnMappings: (defaultValues as any).columnMappings ?? {},
-      sourceVariable: (defaultValues as any).sourceVariable ?? "facebookLead",
+      sourceVariable: (defaultValues as any).sourceVariable ?? "webhook",
     },
   });
 
@@ -79,7 +88,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
       action: defaultValues.action ?? "append",
       values: defaultValues.values ?? '[["Value 1", "Value 2"]]',
       columnMappings: (defaultValues as any).columnMappings ?? {},
-      sourceVariable: (defaultValues as any).sourceVariable ?? "facebookLead",
+      sourceVariable: (defaultValues as any).sourceVariable ?? "webhook",
     });
   }, [open, defaultValues, form]);
 
@@ -158,7 +167,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
 
   const varName = form.watch("variableName") || "mySheets";
   const action = form.watch("action");
-  const sourceVariable = form.watch("sourceVariable") || "facebookLead";
+  const sourceVariable = form.watch("sourceVariable") || "webhook";
   const watchedCredentialId = form.watch("credentialId");
   const watchedSpreadsheetId = form.watch("spreadsheetId");
   const watchedSheetTitle = form.watch("sheetTitle");
@@ -255,6 +264,41 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
     onOpenChange(false);
   };
 
+  const handleSendTestRow = async () => {
+    const valid = await form.trigger(["credentialId", "spreadsheetId", "sheetTitle", "range"]);
+    if (!valid) {
+      toast.error("Please fix the highlighted fields before sending a test row.");
+      return;
+    }
+
+    const credentialId = form.getValues("credentialId");
+    const spreadsheetId = form.getValues("spreadsheetId");
+    const sheetTitle = form.getValues("sheetTitle");
+    const rangeValue = form.getValues("range") || (sheetTitle ? `${sheetTitle}!A:Z` : "Sheet1!A:Z");
+
+    try {
+      const res = await fetch("/api/triggers/google-sheets/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credentialId,
+          spreadsheetId,
+          range: rangeValue,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Failed to send test row to Google Sheets.");
+        return;
+      }
+
+      toast.success("Test row sent to Google Sheets. Check your sheet to verify.");
+    } catch {
+      toast.error("Failed to send test row to Google Sheets.");
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="min-w-8xl">
@@ -348,8 +392,8 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="facebookLead">Facebook lead (webhooks)</SelectItem>
                         <SelectItem value="webhook">Generic webhook</SelectItem>
+                        <SelectItem value="facebookLead">Facebook lead (webhooks)</SelectItem>
                         <SelectItem value={varName}>{varName} (this Sheets node)</SelectItem>
                       </SelectContent>
                     </Select>
@@ -452,10 +496,41 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
                 {action === "append" && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <FormLabel>Column mapping</FormLabel>
-                      <span className="text-xs text-muted-foreground">
-                        Map your workflow fields into spreadsheet columns.
-                      </span>
+                      <div className="flex flex-col gap-0.5">
+                        <FormLabel>Column mapping</FormLabel>
+                        <span className="text-xs text-muted-foreground">
+                          Map your workflow fields into spreadsheet columns. Use variables from{" "}
+                          <code className="bg-muted px-1 rounded text-[11px]">
+                            {sourceVariable}
+                          </code>{" "}
+                          such as <code className="bg-muted px-1 rounded text-[11px]">{`{{${sourceVariable}.body.Email}}`}</code>.
+                        </span>
+                      </div>
+                      {columns.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            const updated: Record<string, string> = {};
+                            for (const [key, value] of Object.entries(columnMappings)) {
+                              if (typeof value === "string") {
+                                updated[key] = value;
+                              }
+                            }
+                            for (const col of columns) {
+                              if (updated[col]) continue;
+                              const varRoot = sourceVariable;
+                              updated[col] = `{{${varRoot}.${col}}}`;
+                            }
+                            form.setValue("columnMappings", updated);
+                            toast.success("Filled empty columns with template paths from the selected source.");
+                          }}
+                        >
+                          Fill all columns
+                        </Button>
+                      )}
                     </div>
                     <div className="border rounded-md p-3 max-h-72 overflow-auto space-y-2 bg-muted/40">
                       {loadingColumns && (
@@ -472,16 +547,24 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
                           control={form.control}
                           name={`columnMappings.${col}` as const}
                           render={({ field }) => (
-                            <FormItem className="grid grid-cols-[160px,1fr] items-center gap-2">
-                              <FormLabel className="text-xs font-medium truncate">
-                                {col}
-                              </FormLabel>
-                              <FormControl>
-                                <Input
-                                  placeholder={`{{${sourceVariable}.${col}}}`}
-                                  {...field}
-                                />
-                              </FormControl>
+                            <FormItem className="space-y-1.5">
+                              <div className="grid grid-cols-[160px,1fr] items-center gap-2">
+                                <FormLabel className="text-xs font-medium truncate">
+                                  {col}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder={`{{${sourceVariable}.${col}}}`}
+                                    {...field}
+                                  />
+                                </FormControl>
+                              </div>
+                              <VariablesHint
+                                variables={availableVariables}
+                                onInsert={(path) => {
+                                  field.onChange(path);
+                                }}
+                              />
                             </FormItem>
                           )}
                         />
@@ -524,7 +607,10 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
               </div>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="flex items-center justify-between">
+              <Button type="button" variant="outline" onClick={handleSendTestRow}>
+                Send test row
+              </Button>
               <Button type="submit">Save</Button>
             </DialogFooter>
           </form>

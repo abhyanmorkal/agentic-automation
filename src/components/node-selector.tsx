@@ -33,6 +33,7 @@ import { Separator } from "./ui/separator";
 const ENABLED_NODE_TYPES: Set<NodeType> = new Set([
   NodeType.FACEBOOK_LEAD_TRIGGER,
   NodeType.GOOGLE_SHEETS,
+  NodeType.WEBHOOK_TRIGGER,
 ]);
 
 export type NodeTypeOption = {
