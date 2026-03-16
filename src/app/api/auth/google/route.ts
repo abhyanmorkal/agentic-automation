@@ -11,10 +11,12 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const credentialName = searchParams.get("name") || "My Google Account";
+  const mode = searchParams.get("mode") === "popup" ? "popup" : "redirect";
 
-  // State encodes userId + credential name (base64 so it survives URL encoding)
+  // State encodes userId + credential name (+ optional mode) in base64 so it
+  // survives URL encoding.
   const state = Buffer.from(
-    JSON.stringify({ userId: session.user.id, name: credentialName }),
+    JSON.stringify({ userId: session.user.id, name: credentialName, mode }),
   ).toString("base64url");
 
   redirect(getGoogleAuthUrl(state));
