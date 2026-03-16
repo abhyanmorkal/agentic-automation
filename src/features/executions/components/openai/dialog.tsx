@@ -188,7 +188,7 @@ export const OpenAiDialog = ({
                   />
                 </FormControl>
                   <FormDescription>
-                    Sets the behavior of the assistant. Use {"{{variables}}"} for simple values or {"{{json variable}}"} to stringify objects
+                    Sets the behavior of the assistant. Use {"{{variables}}"} for simple values or {"{{json variable}}"} to stringify objects.
                   </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -208,7 +208,7 @@ export const OpenAiDialog = ({
                   />
                 </FormControl>
                   <FormDescription>
-                    The prompt to send to the AI. Use {"{{variables}}"} for simple values or {"{{json variable}}"} to stringify objects
+                    The prompt to send to the AI. Use {"{{variables}}"} for simple values or {"{{json variable}}"} to stringify objects.
                   </FormDescription>
                 <FormMessage />
               </FormItem>

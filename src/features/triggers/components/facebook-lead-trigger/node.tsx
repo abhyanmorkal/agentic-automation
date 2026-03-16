@@ -19,6 +19,10 @@ type FacebookLeadTriggerData = {
   pageName?: string;
   formId?: string;
   formName?: string;
+  sampleResponseRaw?: unknown;
+  sampleResponseSimple?: Record<string, unknown>;
+  sampleResponseAdvanced?: Record<string, unknown>;
+  lastSampleCapturedAt?: string;
 };
 
 type FacebookLeadTriggerNodeType = Node<FacebookLeadTriggerData>;
@@ -58,6 +62,7 @@ export const FacebookLeadTriggerNode = memo((props: NodeProps<FacebookLeadTrigge
         onOpenChange={setDialogOpen}
         onSubmit={handleSubmit}
         defaultValues={nodeData}
+        nodeId={props.id}
       />
       <BaseTriggerNode
         {...props}

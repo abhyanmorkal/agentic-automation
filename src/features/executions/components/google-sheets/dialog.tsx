@@ -34,6 +34,7 @@ const formSchema = z.object({
   action: z.enum(["append", "read"]),
   values: z.string().optional(),
   columnMappings: z.record(z.string(), z.string().optional()).optional(),
+  sourceVariable: z.string().min(1, "Source variable is required"),
 });
 
 export type GoogleSheetsFormValues = z.infer<typeof formSchema>;
@@ -64,6 +65,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
       action: defaultValues.action ?? "append",
       values: defaultValues.values ?? '[["Value 1", "Value 2"]]',
       columnMappings: (defaultValues as any).columnMappings ?? {},
+      sourceVariable: (defaultValues as any).sourceVariable ?? "facebookLead",
     },
   });
 
@@ -77,6 +79,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
       action: defaultValues.action ?? "append",
       values: defaultValues.values ?? '[["Value 1", "Value 2"]]',
       columnMappings: (defaultValues as any).columnMappings ?? {},
+      sourceVariable: (defaultValues as any).sourceVariable ?? "facebookLead",
     });
   }, [open, defaultValues, form]);
 
@@ -155,6 +158,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
 
   const varName = form.watch("variableName") || "mySheets";
   const action = form.watch("action");
+  const sourceVariable = form.watch("sourceVariable") || "facebookLead";
   const watchedCredentialId = form.watch("credentialId");
   const watchedSpreadsheetId = form.watch("spreadsheetId");
   const watchedSheetTitle = form.watch("sheetTitle");
@@ -262,7 +266,9 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
         </DialogHeader>
         <Form {...form}>
           <form
-            onSubmit={form.handleSubmit(handleSubmit)}
+            onSubmit={form.handleSubmit(handleSubmit, () => {
+              toast.error("Please fix the highlighted fields before saving this Google Sheets node.");
+            })}
             className="mt-4 space-y-6"
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -328,6 +334,28 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
                         <SelectItem value="read">Get Row(s)</SelectItem>
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="sourceVariable" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Source data</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select source variable" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="facebookLead">Facebook lead (webhooks)</SelectItem>
+                        <SelectItem value="webhook">Generic webhook</SelectItem>
+                        <SelectItem value={varName}>{varName} (this Sheets node)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Choose which node&apos;s data you want to map into this sheet.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -450,7 +478,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
                               </FormLabel>
                               <FormControl>
                                 <Input
-                                  placeholder={`{{${varName}.${col}}}`}
+                                  placeholder={`{{${sourceVariable}.${col}}}`}
                                   {...field}
                                 />
                               </FormControl>
@@ -468,7 +496,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
                       <FormLabel>Range (advanced)</FormLabel>
                       <FormControl><Input placeholder="Sheet1!A:Z" {...field} /></FormControl>
                       <FormDescription>
-                        Normally auto-filled from the selected sheet. Override only for advanced cases.
+                        Range decides where rows are read or written, for example `Sheet1!A:Z`. Normally this is auto-filled from the selected sheet; override only for advanced cases.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -486,7 +514,7 @@ export const GoogleSheetsDialog = ({ open, onOpenChange, onSubmit, defaultValues
                           />
                         </FormControl>
                         <FormDescription>
-                          Automatically built from column mapping above. Only edit if you need full control.
+                          Normally built automatically from the column mapping above. Edit only if you need full custom JSON.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

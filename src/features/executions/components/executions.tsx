@@ -17,6 +17,8 @@ import type { Execution } from "@/generated/prisma";
 import { ExecutionStatus } from "@/generated/prisma";
 import { CheckCircle2Icon, ClockIcon, Loader2Icon, RefreshCwIcon, XCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useState } from "react";
 
 export const ExecutionsList = () => {
   const executions = useSuspenseExecutions();
@@ -113,6 +115,7 @@ export const ExecutionItem = ({
   };
 }) => {
   const retryExecution = useRetryExecution();
+  const [contextOpen, setContextOpen] = useState(false);
 
   const duration = data.completedAt
     ? Math.round(
@@ -129,32 +132,64 @@ export const ExecutionItem = ({
   );
 
   return (
-    <EntityItem
-      href={`/executions/${data.id}`}
-      title={formatStatus(data.status)}
-      subtitle={subtitle}
-      image={
-        <div className="size-8 flex items-center justify-center">
-          {getStatusIcon(data.status)}
-        </div>
-      }
-      actions={
-        data.status === ExecutionStatus.FAILED ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={retryExecution.isPending}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              retryExecution.mutate({ id: data.id });
-            }}
-          >
-            <RefreshCwIcon className="size-3" />
-            Retry
-          </Button>
-        ) : undefined
-      }
-    />
+    <>
+      <EntityItem
+        href={`/executions/${data.id}`}
+        title={formatStatus(data.status)}
+        subtitle={subtitle}
+        image={
+          <div className="size-8 flex items-center justify-center">
+            {getStatusIcon(data.status)}
+          </div>
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setContextOpen(true);
+              }}
+            >
+              View context
+            </Button>
+            {data.status === ExecutionStatus.FAILED && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={retryExecution.isPending}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  retryExecution.mutate({ id: data.id });
+                }}
+              >
+                <RefreshCwIcon className="size-3" />
+                Retry
+              </Button>
+            )}
+          </div>
+        }
+      />
+      <Dialog open={contextOpen} onOpenChange={setContextOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Execution context</DialogTitle>
+          </DialogHeader>
+          <pre className="mt-2 max-h-[480px] overflow-auto rounded bg-muted p-3 text-xs font-mono">
+            {JSON.stringify(
+              {
+                initialData: data.initialData,
+                output: data.output,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 };
