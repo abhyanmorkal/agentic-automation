@@ -8,6 +8,7 @@ type RequestBody = {
   credentialId: string;
   spreadsheetId: string;
   range: string;
+  values?: string[][];
 };
 
 async function getAccessToken(refreshToken: string): Promise<string> {
@@ -51,9 +52,10 @@ export async function POST(request: NextRequest) {
     const refreshToken = decrypt(credential.value);
     const accessToken = await getAccessToken(refreshToken);
 
-    const values: string[][] = [
-      ["Test row from Litchoo", new Date().toISOString()],
-    ];
+    const values: string[][] =
+      body.values && body.values.length > 0
+        ? body.values
+        : [["Test row from Litchoo", new Date().toISOString()]];
 
     const response = await ky
       .post(

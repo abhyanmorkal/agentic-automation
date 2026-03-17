@@ -153,14 +153,20 @@ export async function POST(
     await prisma.node.update({
       where: { id: node.id },
       data: {
-        data: updatedData,
+        data: updatedData as any,
       },
     });
 
     await sendWorkflowExecution({
       workflowId,
       initialData: {
-        webhook: webhookData,
+        webhook: {
+          ...webhookData,
+          // Expose any saved design-time samples to downstream nodes for mapping.
+          // This keeps existing `webhook.body.*` references working while allowing
+          // optional access to `webhook.savedResponses.*` when needed.
+          savedResponses: (nodeData.savedResponses ?? {}) as Record<string, unknown>,
+        },
       },
     });
 

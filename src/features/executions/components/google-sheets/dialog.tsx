@@ -1,13 +1,22 @@
 "use client";
 
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,7 +33,6 @@ import {
   fetchGoogleSheets,
   fetchGoogleSpreadsheets,
 } from "./actions";
-import { VariablesHint } from "../variables-hint";
 import type { VariableTree } from "@/features/executions/lib/variable-tree";
 
 const formSchema = z.object({
@@ -47,6 +55,8 @@ interface Props {
   onSubmit: (values: GoogleSheetsFormValues) => void;
   defaultValues?: Partial<GoogleSheetsFormValues>;
   availableVariables?: VariableTree;
+  savedResponseFields?: { key: string; label: string; example?: string }[];
+  activeResponseName?: string;
 }
 
 export const GoogleSheetsDialog = ({
@@ -55,6 +65,8 @@ export const GoogleSheetsDialog = ({
   onSubmit,
   defaultValues = {},
   availableVariables = {},
+  savedResponseFields = [],
+  activeResponseName,
 }: Props) => {
   const {
     data: credentials,
@@ -251,8 +263,20 @@ export const GoogleSheetsDialog = ({
     const range = sheetTitle ? `${sheetTitle}!A:Z` : values.range;
 
     let finalValues = values.values;
-    if (values.action === "append" && columns.length > 0 && Object.keys(columnMappings).length > 0) {
-      const row = columns.map((col) => columnMappings[col] || "");
+    if (
+      values.action === "append" &&
+      columns.length > 0 &&
+      Object.keys(columnMappings).length > 0 &&
+      savedResponseFields.length > 0 &&
+      activeResponseName
+    ) {
+      const responseName = activeResponseName;
+      const row = columns.map((col) => {
+        const key = columnMappings[col];
+        if (!key) return "";
+        // Build a template that pulls from the saved webhook response.
+        return `{{webhook.savedResponses['${responseName}'].data.${key}}}`;
+      });
       finalValues = JSON.stringify([row]);
     }
 
@@ -275,6 +299,19 @@ export const GoogleSheetsDialog = ({
     const spreadsheetId = form.getValues("spreadsheetId");
     const sheetTitle = form.getValues("sheetTitle");
     const rangeValue = form.getValues("range") || (sheetTitle ? `${sheetTitle}!A:Z` : "Sheet1!A:Z");
+    const currentMappings = form.getValues("columnMappings") ?? {};
+
+    // Build test row from column mappings using example values from savedResponseFields
+    let testValues: string[][] | undefined;
+    if (columns.length > 0 && Object.keys(currentMappings).length > 0) {
+      const row = columns.map((col) => {
+        const fieldKey = currentMappings[col];
+        if (!fieldKey) return "";
+        const field = savedResponseFields.find((f) => f.key === fieldKey);
+        return field?.example ?? fieldKey;
+      });
+      testValues = [row];
+    }
 
     try {
       const res = await fetch("/api/triggers/google-sheets/test", {
@@ -284,6 +321,7 @@ export const GoogleSheetsDialog = ({
           credentialId,
           spreadsheetId,
           range: rangeValue,
+          ...(testValues ? { values: testValues } : {}),
         }),
       });
 
@@ -299,13 +337,15 @@ export const GoogleSheetsDialog = ({
     }
   };
 
+  const hasSavedResponseFields = savedResponseFields.length > 0 && !!activeResponseName;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="min-w-8xl">
+      <DialogContent className="w-full max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Google Sheets Configuration</DialogTitle>
           <DialogDescription>
-            Connect your Google account and map workflow data into a clean spreadsheet, Litchoo-style.
+            Append new rows or read data from a Google Sheet.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -323,7 +363,7 @@ export const GoogleSheetsDialog = ({
                     <FormLabel>Variable Name</FormLabel>
                     <FormControl><Input placeholder="mySheets" {...field} /></FormControl>
                     <FormDescription>
-                      Reference as {`{{${varName}.values}}`} (read) or {`{{${varName}.updatedRows}}`} (append)
+                      Result will be available as {`{{${varName}}}`} in later nodes.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -361,9 +401,6 @@ export const GoogleSheetsDialog = ({
                         {connectingGoogle ? "Connecting…" : "Connect with Google"}
                       </Button>
                     </div>
-                    <FormDescription>
-                      Choose an existing Google account or connect a new one in a popup.
-                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -397,9 +434,6 @@ export const GoogleSheetsDialog = ({
                         <SelectItem value={varName}>{varName} (this Sheets node)</SelectItem>
                       </SelectContent>
                     </Select>
-                    <FormDescription>
-                      Choose which node&apos;s data you want to map into this sheet.
-                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -499,38 +533,9 @@ export const GoogleSheetsDialog = ({
                       <div className="flex flex-col gap-0.5">
                         <FormLabel>Column mapping</FormLabel>
                         <span className="text-xs text-muted-foreground">
-                          Map your workflow fields into spreadsheet columns. Use variables from{" "}
-                          <code className="bg-muted px-1 rounded text-[11px]">
-                            {sourceVariable}
-                          </code>{" "}
-                          such as <code className="bg-muted px-1 rounded text-[11px]">{`{{${sourceVariable}.body.Email}}`}</code>.
+                          Choose which field from the saved webhook response should populate each column.
                         </span>
                       </div>
-                      {columns.length > 0 && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => {
-                            const updated: Record<string, string> = {};
-                            for (const [key, value] of Object.entries(columnMappings)) {
-                              if (typeof value === "string") {
-                                updated[key] = value;
-                              }
-                            }
-                            for (const col of columns) {
-                              if (updated[col]) continue;
-                              const varRoot = sourceVariable;
-                              updated[col] = `{{${varRoot}.${col}}}`;
-                            }
-                            form.setValue("columnMappings", updated);
-                            toast.success("Filled empty columns with template paths from the selected source.");
-                          }}
-                        >
-                          Fill all columns
-                        </Button>
-                      )}
                     </div>
                     <div className="border rounded-md p-3 max-h-72 overflow-auto space-y-2 bg-muted/40">
                       {loadingColumns && (
@@ -553,18 +558,36 @@ export const GoogleSheetsDialog = ({
                                   {col}
                                 </FormLabel>
                                 <FormControl>
-                                  <Input
-                                    placeholder={`{{${sourceVariable}.${col}}}`}
-                                    {...field}
-                                  />
+                                  <Select
+                                    value={field.value ?? ""}
+                                    onValueChange={field.onChange}
+                                    disabled={!hasSavedResponseFields}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue
+                                        placeholder={
+                                          hasSavedResponseFields
+                                            ? "Choose field"
+                                            : "No saved response fields"
+                                        }
+                                      />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {savedResponseFields.map((f) => (
+                                        <SelectItem key={f.key} value={f.key}>
+                                          {f.label}
+                                          {f.example ? ` — ${f.example}` : ""}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
                                 </FormControl>
                               </div>
-                              <VariablesHint
-                                variables={availableVariables}
-                                onInsert={(path) => {
-                                  field.onChange(path);
-                                }}
-                              />
+                              {!hasSavedResponseFields && (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Capture and save a webhook response first to enable mapping.
+                                </p>
+                              )}
                             </FormItem>
                           )}
                         />
@@ -579,7 +602,7 @@ export const GoogleSheetsDialog = ({
                       <FormLabel>Range (advanced)</FormLabel>
                       <FormControl><Input placeholder="Sheet1!A:Z" {...field} /></FormControl>
                       <FormDescription>
-                        Range decides where rows are read or written, for example `Sheet1!A:Z`. Normally this is auto-filled from the selected sheet; override only for advanced cases.
+                        Where to read or write rows, e.g. `Sheet1!A:Z`. Usually autofilled from the selected sheet.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -597,7 +620,7 @@ export const GoogleSheetsDialog = ({
                           />
                         </FormControl>
                         <FormDescription>
-                          Normally built automatically from the column mapping above. Edit only if you need full custom JSON.
+                          Normally built automatically from the column mapping. Edit only if you need full custom JSON.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

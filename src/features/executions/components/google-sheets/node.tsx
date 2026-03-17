@@ -1,6 +1,6 @@
 "use client";
 
-import { useReactFlow, type Node, type NodeProps } from "@xyflow/react";
+import { useReactFlow, useEdges, useNodes, type Node, type NodeProps } from "@xyflow/react";
 import { memo, useMemo, useState } from "react";
 import { Google } from "@lobehub/icons";
 import { BaseExecutionNode } from "../base-execution-node";
@@ -26,6 +26,8 @@ type GoogleSheetsNodeType = Node<GoogleSheetsNodeData>;
 export const GoogleSheetsNode = memo((props: NodeProps<GoogleSheetsNodeType>) => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const { setNodes } = useReactFlow();
+  const edges = useEdges();
+  const nodes = useNodes();
 
   const nodeStatus = useNodeStatus({
     nodeId: props.id,
@@ -35,7 +37,7 @@ export const GoogleSheetsNode = memo((props: NodeProps<GoogleSheetsNodeType>) =>
   });
 
   const handleSubmit = (values: GoogleSheetsFormValues) => {
-    setNodes((nodes) => nodes.map((n) => n.id === props.id ? { ...n, data: { ...n.data, ...values } } : n));
+    setNodes((ns) => ns.map((n) => n.id === props.id ? { ...n, data: { ...n.data, ...values } } : n));
   };
 
   const availableVariables = useMemo(() => {
@@ -43,6 +45,63 @@ export const GoogleSheetsNode = memo((props: NodeProps<GoogleSheetsNodeType>) =>
     const sourceVariable = (props.data?.sourceVariable as string | undefined) ?? "webhook";
     return buildVariableTreeFromContext(context as WorkflowContext, sourceVariable);
   }, [props.data]);
+
+  const { savedResponseFields, activeResponseName } = useMemo(() => {
+    // Find upstream webhook trigger node by traversing edges
+    const upstreamIds = new Set(
+      edges.filter((e) => e.target === props.id).map((e) => e.source),
+    );
+    const webhookNode = nodes.find(
+      (n) => upstreamIds.has(n.id) && n.type === "WEBHOOK_TRIGGER",
+    );
+
+    const saved = (webhookNode?.data as any)?.savedResponses as
+      | Record<string, { data?: Record<string, unknown> | unknown }>
+      | undefined;
+
+    if (!saved) {
+      return {
+        savedResponseFields: [] as { key: string; label: string; example?: string }[],
+        activeResponseName: undefined as string | undefined,
+      };
+    }
+
+    const names = Object.keys(saved);
+    if (names.length === 0) {
+      return {
+        savedResponseFields: [] as { key: string; label: string; example?: string }[],
+        activeResponseName: undefined as string | undefined,
+      };
+    }
+
+    const preferredName = names.includes("Response A") ? "Response A" : names[0]!;
+    const selected = saved[preferredName];
+    const data = selected?.data;
+
+    if (!data || typeof data !== "object") {
+      return {
+        savedResponseFields: [] as { key: string; label: string; example?: string }[],
+        activeResponseName: preferredName,
+      };
+    }
+
+    const fields: { key: string; label: string; example?: string }[] = [];
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      if (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+      ) {
+        fields.push({
+          key,
+          label: key,
+          example: String(value),
+        });
+      }
+    }
+
+    return { savedResponseFields: fields, activeResponseName: preferredName };
+  }, [props.id, edges, nodes]);
 
   const description = props.data?.spreadsheetId
     ? `${props.data.action ?? "append"} · ${props.data.range ?? ""}`
@@ -56,6 +115,8 @@ export const GoogleSheetsNode = memo((props: NodeProps<GoogleSheetsNodeType>) =>
         onSubmit={handleSubmit}
         defaultValues={props.data}
         availableVariables={availableVariables}
+        savedResponseFields={savedResponseFields}
+        activeResponseName={activeResponseName}
       />
       <BaseExecutionNode
         {...props}

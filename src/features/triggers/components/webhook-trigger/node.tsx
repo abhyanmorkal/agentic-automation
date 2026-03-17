@@ -1,5 +1,5 @@
-import { Node, type NodeProps } from "@xyflow/react";
-import { memo, useState } from "react";
+import { Node, type NodeProps, useReactFlow } from "@xyflow/react";
+import { memo, useCallback, useState } from "react";
 import { BaseTriggerNode } from "../base-trigger-node";
 import { WebhookIcon } from "lucide-react";
 import { WebhookTriggerDialog } from "./dialog";
@@ -13,12 +13,14 @@ type WebhookTriggerData = {
   sampleResponseSimple?: Record<string, unknown>;
   sampleResponseAdvanced?: Record<string, unknown>;
   lastSampleCapturedAt?: string;
+  savedResponses?: Record<string, { type: "simple" | "advanced" | "raw"; data: unknown; createdAt: string }>;
 };
 
 type WebhookTriggerNodeType = Node<WebhookTriggerData>;
 
 export const WebhookTriggerNode = memo((props: NodeProps<WebhookTriggerNodeType>) => {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { setNodes } = useReactFlow();
 
   const nodeStatus = useNodeStatus({
     nodeId: props.id,
@@ -28,6 +30,17 @@ export const WebhookTriggerNode = memo((props: NodeProps<WebhookTriggerNodeType>
   });
 
   const handleOpenSettings = () => setDialogOpen(true);
+
+  const handleSavedResponsesChange = useCallback(
+    (savedResponses: Record<string, { type: "simple" | "advanced" | "raw"; data: unknown; createdAt: string }>) => {
+      setNodes((nodes) =>
+        nodes.map((n) =>
+          n.id === props.id ? { ...n, data: { ...n.data, savedResponses } } : n,
+        ),
+      );
+    },
+    [props.id, setNodes],
+  );
 
   const nodeData = props.data;
   const description =
@@ -41,6 +54,7 @@ export const WebhookTriggerNode = memo((props: NodeProps<WebhookTriggerNodeType>
         onOpenChange={setDialogOpen}
         nodeId={props.id}
         defaultValues={nodeData}
+        onSavedResponsesChange={handleSavedResponsesChange}
       />
       <BaseTriggerNode
         {...props}

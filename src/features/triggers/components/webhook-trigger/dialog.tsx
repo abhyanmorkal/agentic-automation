@@ -32,6 +32,14 @@ type WebhookTriggerDialogData = {
   sampleResponseSimple?: Record<string, unknown>;
   sampleResponseAdvanced?: Record<string, unknown>;
   lastSampleCapturedAt?: string;
+  savedResponses?: Record<
+    string,
+    {
+      type: "simple" | "advanced" | "raw";
+      data: unknown;
+      createdAt: string;
+    }
+  >;
 };
 
 interface Props {
@@ -39,6 +47,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   nodeId: string;
   defaultValues?: Partial<WebhookTriggerDialogData>;
+  onSavedResponsesChange?: (savedResponses: Record<string, { type: "simple" | "advanced" | "raw"; data: unknown; createdAt: string }>) => void;
 }
 
 function encodeToken(workflowId: string, nodeId: string) {
@@ -55,6 +64,7 @@ export const WebhookTriggerDialog = ({
   onOpenChange,
   nodeId,
   defaultValues,
+  onSavedResponsesChange,
 }: Props) => {
   const params = useParams();
   const workflowId = params.workflowId as string;
@@ -72,6 +82,13 @@ export const WebhookTriggerDialog = ({
   const [sampleRaw, setSampleRaw] = useState<unknown | null>(
     defaultValues?.sampleResponseRaw ?? null,
   );
+  const [savedResponses, setSavedResponses] = useState<
+    WebhookTriggerDialogData["savedResponses"] | undefined
+  >(defaultValues?.savedResponses);
+  const [savingName, setSavingName] = useState<"Response A" | "Response B" | "Response C">(
+    "Response A",
+  );
+  const [saving, setSaving] = useState(false);
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -141,112 +158,148 @@ export const WebhookTriggerDialog = ({
     return sampleRaw;
   }, [responseFormat, sampleSimple, sampleAdvanced, sampleRaw]);
 
+  const handleSaveNamedResponse = async () => {
+    if (!selectedResponse) {
+      toast.error("Capture a response first before saving.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/triggers/webhook/save-response", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workflowId,
+          nodeId,
+          name: savingName,
+          type: responseFormat,
+          data: selectedResponse,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Failed to save named response.");
+        return;
+      }
+
+      const updated = json.savedResponses as WebhookTriggerDialogData["savedResponses"];
+      setSavedResponses(updated);
+      onSavedResponsesChange?.(updated as Record<string, { type: "simple" | "advanced" | "raw"; data: unknown; createdAt: string }>);
+      toast.success(`Saved as ${savingName}. You can use it in next nodes.`);
+    } catch {
+      toast.error("Failed to save named response.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <WebhookIcon className="size-5 text-primary" />
             <DialogTitle>Webhook Trigger</DialogTitle>
           </div>
           <DialogDescription>
-            Generate a unique URL for this workflow. Send any HTTP POST to this URL to
-            start the workflow. The request is available as{" "}
-            <code className="bg-muted px-1 py-0.5 rounded text-xs">
-              {"{{webhook.body.*}}"}
-            </code>{" "}
-            in downstream nodes.
+            Connect any app that can send an HTTP POST and use the payload in your next nodes.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 mt-1">
-          {/* Webhook URL */}
-          <div className="space-y-2">
-            <Label>Your Webhook URL</Label>
-            <div className="flex gap-2">
-              <Input
-                value={webhookUrl}
-                readOnly
-                className="font-mono text-xs h-9"
-              />
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                className="shrink-0 h-9 w-9"
-                onClick={() => copyToClipboard(webhookUrl)}
-              >
-                {copied ? (
-                  <CheckIcon className="size-4 text-green-500" />
-                ) : (
-                  <CopyIcon className="size-4" />
-                )}
-              </Button>
+        <div className="mt-3 grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Webhook URL</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={webhookUrl}
+                  readOnly
+                  className="font-mono text-xs h-9"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="shrink-0 h-9 w-9"
+                  onClick={() => copyToClipboard(webhookUrl)}
+                >
+                  {copied ? (
+                    <CheckIcon className="size-4 text-green-500" />
+                  ) : (
+                    <CopyIcon className="size-4" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Paste this URL into your app&apos;s webhook settings and send a POST request.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Copy this URL into the webhook section of any app. Each workflow gets its
-              own unique URL – do not reuse between workflows.
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              Example: <code className="bg-muted px-1 rounded">{webhookUrl}</code>
-            </p>
-          </div>
 
-          {/* Setup instructions */}
-          <div className="rounded-md border bg-muted/40 p-4 space-y-2">
-            <div className="flex items-center gap-1.5">
-              <InfoIcon className="size-3.5 text-muted-foreground" />
-              <h4 className="text-sm font-medium">How to use this URL</h4>
+            <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <InfoIcon className="size-3.5 text-muted-foreground" />
+                <h4 className="text-xs font-semibold">Quick steps</h4>
+              </div>
+              <ul className="text-xs text-muted-foreground space-y-0.5 list-disc list-inside">
+                <li>Add the URL above in your source app.</li>
+                <li>Click <span className="font-medium">Capture response</span> on the right.</li>
+                <li>Send a test event; we&apos;ll show the data instantly.</li>
+              </ul>
             </div>
-            <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-1">
-              <li>Log in to the application where you want to configure the webhook.</li>
-              <li>Copy the webhook URL above and paste it into the webhook URL field.</li>
-              <li>
-                Click <strong>Capture Webhook Response</strong> below.
-              </li>
-              <li>
-                Send a test record from that application. The response will appear here and
-                can be used to configure downstream nodes.
-              </li>
-            </ol>
-            <p className="text-[11px] text-muted-foreground">
-              Important: webhook URLs are unique per workflow. URLs from two workflows may
-              look similar, but they are not interchangeable.
-            </p>
-          </div>
 
-          {/* Available variables */}
-          <div className="rounded-md border bg-muted/40 p-4 space-y-3">
-            <div className="flex items-center gap-1.5">
-              <ZapIcon className="size-3.5 text-primary" />
-              <h4 className="text-sm font-medium">Available Variables</h4>
-            </div>
-            <div className="space-y-1.5 text-xs text-muted-foreground">
-              {[
-                ["webhook.body", "Full parsed request body as an object"],
-                ["webhook.body.email", "Email field from the body, if present"],
-                ["webhook.query", "Query string parameters"],
-                ["webhook.headers['x-custom']", "Custom header value"],
-                ["webhook.files", "Uploaded file metadata (name, size, type)"],
-                ["webhook.receivedAt", "ISO timestamp when webhook was received"],
-              ].map(([varName, desc]) => (
-                <div key={varName} className="flex items-start gap-3">
-                  <code className="shrink-0 bg-background border text-xs px-1.5 py-0.5 rounded font-mono">
-                    {`{{${varName}}}`}
+            <div className="rounded-md border bg-muted/40 p-3 space-y-2">
+              <div className="flex items-center gap-1.5">
+                <ZapIcon className="size-3.5 text-primary" />
+                <h4 className="text-xs font-semibold">Use in next nodes</h4>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Common examples:
+              </p>
+              <div className="space-y-1 text-[11px] text-muted-foreground">
+                <div className="flex items-start gap-2">
+                  <code className="bg-background border px-1.5 py-0.5 rounded font-mono text-[11px]">
+                    {"{{webhook.body.email}}"}
                   </code>
-                  <span className="text-xs text-muted-foreground leading-5">
-                    {desc}
-                  </span>
+                  <span className="leading-4">Customer email from the payload.</span>
                 </div>
-              ))}
+                <div className="flex items-start gap-2">
+                  <code className="bg-background border px-1.5 py-0.5 rounded font-mono text-[11px]">
+                    {"{{webhook.body.name}}"}
+                  </code>
+                  <span className="leading-4">Customer name or contact name.</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Works with
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  "Razorpay",
+                  "WooCommerce",
+                  "Typeform",
+                  "Shopify",
+                  "GitHub",
+                  "Jotform",
+                  "Zapier",
+                  "Make.com",
+                  "Postman",
+                ].map((svc) => (
+                  <Badge key={svc} variant="secondary" className="text-xs font-normal">
+                    {svc}
+                  </Badge>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Capture & response viewer */}
           <div className="space-y-3 rounded-md border bg-muted/30 p-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-muted-foreground">
-                Capture Webhook Response
+                Capture webhook response
               </span>
               <div className="flex items-center gap-2">
                 <Button
@@ -278,7 +331,7 @@ export const WebhookTriggerDialog = ({
             </div>
 
             <div className="flex items-center gap-3 text-xs">
-              <span className="text-muted-foreground">Response format:</span>
+              <span className="text-muted-foreground">View as</span>
               <div className="inline-flex rounded-md border bg-background p-0.5">
                 {(["simple", "advanced", "raw"] as const).map((fmt) => (
                   <button
@@ -300,42 +353,125 @@ export const WebhookTriggerDialog = ({
               </div>
             </div>
 
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Response received</p>
-              <Textarea
-                readOnly
-                className="h-40 font-mono text-xs"
-                value={
-                  selectedResponse
-                    ? JSON.stringify(selectedResponse, null, 2)
-                    : '// No sample captured yet. Click "Capture response" and send a test webhook.'
-                }
-              />
-            </div>
-          </div>
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                {selectedResponse
+                  ? "Sample captured below. Use it to map fields in the next node."
+                  : 'No sample yet. Click "Capture response" and send a test webhook.'}
+              </p>
 
-          {/* Supported services */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Works with any service that sends webhooks
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {[
-                "Razorpay",
-                "WooCommerce",
-                "Typeform",
-                "Shopify",
-                "GitHub",
-                "Jotform",
-                "Zapier",
-                "Make.com",
-                "Postman",
-                "Any REST API",
-              ].map((svc) => (
-                <Badge key={svc} variant="secondary" className="text-xs font-normal">
-                  {svc}
-                </Badge>
-              ))}
+              {responseFormat === "simple" && (
+                <div className="space-y-2">
+                  {sampleSimple && Object.keys(sampleSimple).length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex gap-3 text-[11px] font-medium text-muted-foreground px-0.5">
+                        <span className="flex-1">Label</span>
+                        <span className="flex-[1.6]">Value</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {Object.entries(sampleSimple).map(([key, value]) => (
+                          <div
+                            key={key}
+                            className="flex gap-3 items-center text-xs"
+                          >
+                            <Input
+                              value={key}
+                              readOnly
+                              className="h-8 text-xs bg-muted/60 border-0 pointer-events-none flex-1"
+                            />
+                            <Input
+                              value={String(value)}
+                              readOnly
+                              className="h-8 text-xs bg-muted/40 border-0 pointer-events-none flex-[1.6]"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      No fields found yet. Capture a response first to see label/value pairs.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {responseFormat === "advanced" && (
+                <Textarea
+                  readOnly
+                  className="h-52 font-mono text-xs resize-none whitespace-pre"
+                  value={
+                    sampleAdvanced
+                      ? JSON.stringify(sampleAdvanced, null, 2)
+                      : ""
+                  }
+                  placeholder='// No sample captured yet. Click "Capture response" and send a test webhook.'
+                />
+              )}
+
+              {responseFormat === "raw" && (
+                <Textarea
+                  readOnly
+                  className="h-52 font-mono text-xs resize-none whitespace-pre"
+                  value={
+                    sampleRaw
+                      ? JSON.stringify(
+                          (sampleRaw as any)?.body ?? sampleRaw,
+                          null,
+                          2,
+                        )
+                      : ""
+                  }
+                  placeholder='// No sample captured yet. Click "Capture response" and send a test webhook.'
+                />
+              )}
+            </div>
+
+            <div className="space-y-2 pt-2 border-t mt-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">Save current sample as</span>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="h-7 rounded-md border bg-background px-2 text-xs"
+                    value={savingName}
+                    onChange={(e) =>
+                      setSavingName(e.target.value as "Response A" | "Response B" | "Response C")
+                    }
+                  >
+                    <option value="Response A">Response A</option>
+                    <option value="Response B">Response B</option>
+                    <option value="Response C">Response C</option>
+                  </select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={handleSaveNamedResponse}
+                    disabled={saving}
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </Button>
+                </div>
+              </div>
+              {savedResponses && Object.keys(savedResponses).length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-muted-foreground">
+                    Saved responses will appear in variables as{" "}
+                    <code className="bg-background border px-1 rounded font-mono text-[11px]">
+                      {"{{webhook.savedResponses['Response A']}}"}
+                    </code>{" "}
+                    and can be used by next nodes.
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {Object.keys(savedResponses).map((name) => (
+                      <Badge key={name} variant="secondary" className="text-[10px] font-normal">
+                        {name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
