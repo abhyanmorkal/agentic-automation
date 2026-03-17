@@ -49,19 +49,13 @@ import {
   fetchFacebookPages,
   fetchFacebookLeadForms,
   fetchFacebookSampleLead,
+  testFacebookConnection,
   type FacebookPage,
   type FacebookLeadForm,
   type FacebookSampleLead,
 } from "./actions";
 
-const TRIGGER_EVENTS: { value: "new_lead_instant" | "new_lead_instant_legacy" | "new_lead"; label: string }[] = [
-  { value: "new_lead_instant", label: "New Lead Instant" },
-  { value: "new_lead_instant_legacy", label: "New Lead Instant (Legacy)" },
-  { value: "new_lead", label: "New Lead" },
-];
-
 const formSchema = z.object({
-  triggerEvent: z.enum(["new_lead_instant", "new_lead_instant_legacy", "new_lead"]),
   credentialId: z.string().min(1, "Please connect a Facebook account"),
   pageId: z.string().min(1, "Please select a page"),
   pageName: z.string().optional(),
@@ -99,6 +93,7 @@ export const FacebookLeadTriggerDialog = ({
   const [forms, setForms] = useState<FacebookLeadForm[]>([]);
   const [sampleLead, setSampleLead] = useState<FacebookSampleLead | null>(null);
   const [connectingFb, setConnectingFb] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [loadingPages, startLoadingPages] = useTransition();
   const [loadingForms, startLoadingForms] = useTransition();
@@ -108,7 +103,6 @@ export const FacebookLeadTriggerDialog = ({
   const form = useForm<FacebookLeadTriggerFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      triggerEvent: defaultValues.triggerEvent ?? "new_lead_instant",
       credentialId: defaultValues.credentialId ?? "",
       pageId: defaultValues.pageId ?? "",
       pageName: defaultValues.pageName ?? "",
@@ -125,7 +119,6 @@ export const FacebookLeadTriggerDialog = ({
   useEffect(() => {
     if (open) {
       form.reset({
-        triggerEvent: defaultValues.triggerEvent ?? "new_lead_instant",
         credentialId: defaultValues.credentialId ?? "",
         pageId: defaultValues.pageId ?? "",
         pageName: defaultValues.pageName ?? "",
@@ -220,8 +213,8 @@ export const FacebookLeadTriggerDialog = ({
           form.setValue("pageName", "");
           setForms([]);
         }
-      } catch {
-        toast.error("Failed to load Facebook pages. Check your access token permissions.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to load Facebook pages. Check your access token permissions.");
         setPages([]);
       }
     });
@@ -243,8 +236,8 @@ export const FacebookLeadTriggerDialog = ({
           form.setValue("formId", "");
           form.setValue("formName", "");
         }
-      } catch {
-        toast.error("Failed to load lead gen forms for this page.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to load lead gen forms for this page.");
         setForms([]);
       }
     });
@@ -265,10 +258,25 @@ export const FacebookLeadTriggerDialog = ({
           setSampleLead(lead);
           toast.success("Sample lead loaded!");
         }
-      } catch {
-        toast.error("Failed to load sample lead.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to load sample lead.");
       }
     });
+  };
+
+  const handleTestConnection = async () => {
+    if (!watchedCredentialId) return;
+    setTestingConnection(true);
+    try {
+      const result = await testFacebookConnection(watchedCredentialId);
+      if (result.valid) {
+        toast.success(`Connected as ${result.name ?? "Facebook user"}`);
+      } else {
+        toast.error(result.error ?? "Connection failed");
+      }
+    } finally {
+      setTestingConnection(false);
+    }
   };
 
   const copyWebhookUrl = async () => {
@@ -297,35 +305,6 @@ export const FacebookLeadTriggerDialog = ({
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-
-            {/* Trigger Event — compact dropdown, label only */}
-            <FormField
-              control={form.control}
-              name="triggerEvent"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>When to run</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select event" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {TRIGGER_EVENTS.map((event) => (
-                        <SelectItem key={event.value} value={event.value}>
-                          {event.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription className="sr-only">
-                    New Lead Instant is recommended for most use cases.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
 
             {/* Connect: account + button */}
             <div className="space-y-2">
@@ -374,6 +353,21 @@ export const FacebookLeadTriggerDialog = ({
                   </FormItem>
                 )}
               />
+              {watchedCredentialId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1.5 text-muted-foreground"
+                  onClick={handleTestConnection}
+                  disabled={testingConnection}
+                >
+                  {testingConnection ? (
+                    <Loader2Icon className="size-3 animate-spin" />
+                  ) : null}
+                  {testingConnection ? "Testing…" : "Test connection"}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -552,7 +546,7 @@ export const FacebookLeadTriggerDialog = ({
                     {sampleLead.field_data.slice(0, 5).map((field) => (
                       <div key={field.name} className="flex gap-2 truncate">
                         <code className="shrink-0 text-primary">{`{{facebookLead.fields.${field.name}}}`}</code>
-                        <span className="truncate text-muted-foreground">= {field.values[0]}</span>
+                        <span className="truncate text-muted-foreground">= {field.values[0] ?? "(empty)"}</span>
                       </div>
                     ))}
                     {sampleLead.field_data.length > 5 && (

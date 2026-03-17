@@ -6,7 +6,7 @@ import ky from "ky";
 import { NodeType } from "@/generated/prisma";
 
 const VERIFY_TOKEN = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN || "fb-lead-verify-token";
-const FB_API = "https://graph.facebook.com/v20.0";
+const FB_API = "https://graph.facebook.com/v22.0";
 
 /**
  * GET — Facebook webhook verification handshake.
@@ -119,7 +119,15 @@ export async function POST(request: NextRequest) {
           .json<{ access_token: string }>()
           .catch(() => null);
 
-        const pageToken = pageData?.access_token ?? userToken;
+        if (!pageData?.access_token) {
+          console.error(
+            `[facebook-leads] Failed to fetch page access token for pageId=${pageId} in workflow=${workflowId}. ` +
+            `Ensure the credential has pages_read_engagement and pages_manage_ads permissions.`,
+          );
+          continue;
+        }
+
+        const pageToken = pageData.access_token;
 
         // Fetch the full lead data
         const lead = await ky

@@ -14,6 +14,8 @@ type WebhookTriggerData = {
   sampleResponseAdvanced?: Record<string, unknown>;
   lastSampleCapturedAt?: string;
   savedResponses?: Record<string, { type: "simple" | "advanced" | "raw"; data: unknown; createdAt: string }>;
+  webhookSecret?: string;
+  webhookHistory?: Array<{ receivedAt: string; body: unknown; headers?: Record<string, string>; method?: string; query?: Record<string, string> }>;
 };
 
 type WebhookTriggerNodeType = Node<WebhookTriggerData>;
@@ -42,6 +44,28 @@ export const WebhookTriggerNode = memo((props: NodeProps<WebhookTriggerNodeType>
     [props.id, setNodes],
   );
 
+  const handleDescriptionChange = useCallback(
+    (description: string) => {
+      setNodes((nodes) =>
+        nodes.map((n) =>
+          n.id === props.id ? { ...n, data: { ...n.data, description } } : n,
+        ),
+      );
+    },
+    [props.id, setNodes],
+  );
+
+  const handleWebhookSecretChange = useCallback(
+    (webhookSecret: string) => {
+      setNodes((nodes) =>
+        nodes.map((n) =>
+          n.id === props.id ? { ...n, data: { ...n.data, webhookSecret } } : n,
+        ),
+      );
+    },
+    [props.id, setNodes],
+  );
+
   const nodeData = props.data;
   const description =
     nodeData?.description ??
@@ -55,6 +79,8 @@ export const WebhookTriggerNode = memo((props: NodeProps<WebhookTriggerNodeType>
         nodeId={props.id}
         defaultValues={nodeData}
         onSavedResponsesChange={handleSavedResponsesChange}
+        onDescriptionChange={handleDescriptionChange}
+        onWebhookSecretChange={handleWebhookSecretChange}
       />
       <BaseTriggerNode
         {...props}

@@ -15,9 +15,12 @@ type GoogleSheetsData = {
   variableName?: string;
   credentialId?: string;
   spreadsheetId?: string;
+  sheetTitle?: string;
   range?: string;
   values?: string;
   action?: "append" | "read";
+  sourceVariable?: string;
+  columnMappings?: Record<string, string | undefined>;
 };
 
 async function getAccessToken(refreshToken: string): Promise<string> {

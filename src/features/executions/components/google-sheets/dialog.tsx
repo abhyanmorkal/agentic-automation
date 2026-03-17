@@ -9,6 +9,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form";
 import {
@@ -81,12 +91,12 @@ export const GoogleSheetsDialog = ({
       variableName: defaultValues.variableName ?? "",
       credentialId: defaultValues.credentialId ?? "",
       spreadsheetId: defaultValues.spreadsheetId ?? "",
-      sheetTitle: (defaultValues as any).sheetTitle ?? "",
+      sheetTitle: defaultValues.sheetTitle ?? "",
       range: defaultValues.range ?? "Sheet1!A:Z",
       action: defaultValues.action ?? "append",
       values: defaultValues.values ?? '[["Value 1", "Value 2"]]',
-      columnMappings: (defaultValues as any).columnMappings ?? {},
-      sourceVariable: (defaultValues as any).sourceVariable ?? "webhook",
+      columnMappings: defaultValues.columnMappings ?? {},
+      sourceVariable: defaultValues.sourceVariable ?? "webhook",
     },
   });
 
@@ -95,12 +105,12 @@ export const GoogleSheetsDialog = ({
       variableName: defaultValues.variableName ?? "",
       credentialId: defaultValues.credentialId ?? "",
       spreadsheetId: defaultValues.spreadsheetId ?? "",
-      sheetTitle: (defaultValues as any).sheetTitle ?? "",
+      sheetTitle: defaultValues.sheetTitle ?? "",
       range: defaultValues.range ?? "Sheet1!A:Z",
       action: defaultValues.action ?? "append",
       values: defaultValues.values ?? '[["Value 1", "Value 2"]]',
-      columnMappings: (defaultValues as any).columnMappings ?? {},
-      sourceVariable: (defaultValues as any).sourceVariable ?? "webhook",
+      columnMappings: defaultValues.columnMappings ?? {},
+      sourceVariable: defaultValues.sourceVariable ?? "webhook",
     });
   }, [open, defaultValues, form]);
 
@@ -110,6 +120,7 @@ export const GoogleSheetsDialog = ({
   const [loadingSpreadsheets, setLoadingSpreadsheets] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [loadingColumns, setLoadingColumns] = useState(false);
+  const [testRowConfirm, setTestRowConfirm] = useState<{ rangeValue: string; testValues?: string[][] } | null>(null);
 
   // Embedded Google OAuth popup flow (similar to Facebook)
   useEffect(() => {
@@ -295,13 +306,10 @@ export const GoogleSheetsDialog = ({
       return;
     }
 
-    const credentialId = form.getValues("credentialId");
-    const spreadsheetId = form.getValues("spreadsheetId");
     const sheetTitle = form.getValues("sheetTitle");
     const rangeValue = form.getValues("range") || (sheetTitle ? `${sheetTitle}!A:Z` : "Sheet1!A:Z");
     const currentMappings = form.getValues("columnMappings") ?? {};
 
-    // Build test row from column mappings using example values from savedResponseFields
     let testValues: string[][] | undefined;
     if (columns.length > 0 && Object.keys(currentMappings).length > 0) {
       const row = columns.map((col) => {
@@ -312,6 +320,17 @@ export const GoogleSheetsDialog = ({
       });
       testValues = [row];
     }
+
+    setTestRowConfirm({ rangeValue, testValues });
+  };
+
+  const handleConfirmTestRow = async () => {
+    if (!testRowConfirm) return;
+    const { rangeValue, testValues } = testRowConfirm;
+    setTestRowConfirm(null);
+
+    const credentialId = form.getValues("credentialId");
+    const spreadsheetId = form.getValues("spreadsheetId");
 
     try {
       const res = await fetch("/api/triggers/google-sheets/test", {
@@ -331,7 +350,7 @@ export const GoogleSheetsDialog = ({
         return;
       }
 
-      toast.success("Test row sent to Google Sheets. Check your sheet to verify.");
+      toast.success("Test row appended to Google Sheets. Check your sheet to verify.");
     } catch {
       toast.error("Failed to send test row to Google Sheets.");
     }
@@ -340,6 +359,30 @@ export const GoogleSheetsDialog = ({
   const hasSavedResponseFields = savedResponseFields.length > 0 && !!activeResponseName;
 
   return (
+    <>
+    <AlertDialog open={!!testRowConfirm} onOpenChange={(o) => { if (!o) setTestRowConfirm(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Append test row to sheet?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2">
+              <p>This will write a real row to <span className="font-medium">{testRowConfirm?.rangeValue}</span>. This cannot be undone automatically.</p>
+              {testRowConfirm?.testValues && testRowConfirm.testValues[0] && (
+                <div className="rounded-md border bg-muted/40 p-2 font-mono text-xs break-all">
+                  {testRowConfirm.testValues[0].map((v, i) => (
+                    <span key={i} className="mr-2">{columns[i] ? `${columns[i]}: ` : ""}<span className="text-primary">{v || "(empty)"}</span></span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={handleConfirmTestRow}>Append row</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-full max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -419,24 +462,32 @@ export const GoogleSheetsDialog = ({
                   </FormItem>
                 )} />
 
-                <FormField control={form.control} name="sourceVariable" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Source data</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select source variable" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="webhook">Generic webhook</SelectItem>
-                        <SelectItem value="facebookLead">Facebook lead (webhooks)</SelectItem>
-                        <SelectItem value={varName}>{varName} (this Sheets node)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+                <FormField control={form.control} name="sourceVariable" render={({ field }) => {
+                  const sourceKeys = Object.keys(availableVariables);
+                  const options = sourceKeys.length > 0
+                    ? sourceKeys
+                    : ["webhook", "facebookLead"];
+                  return (
+                    <FormItem>
+                      <FormLabel>Source data</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select source variable" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {options.map((key) => (
+                            <SelectItem key={key} value={key}>
+                              {key}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }} />
 
                 <FormField control={form.control} name="spreadsheetId" render={({ field }) => (
                   <FormItem>
@@ -537,6 +588,15 @@ export const GoogleSheetsDialog = ({
                         </span>
                       </div>
                     </div>
+                    {columns.length > 0 && Object.keys(columnMappings).length > 0 && (() => {
+                      const unmapped = columns.filter((col) => !columnMappings[col]);
+                      return unmapped.length > 0 ? (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
+                          {unmapped.length} column{unmapped.length > 1 ? "s" : ""} will be written as empty:{" "}
+                          <span className="font-medium">{unmapped.join(", ")}</span>
+                        </p>
+                      ) : null;
+                    })()}
                     <div className="border rounded-md p-3 max-h-72 overflow-auto space-y-2 bg-muted/40">
                       {loadingColumns && (
                         <p className="text-xs text-muted-foreground">Loading columns…</p>
@@ -632,7 +692,7 @@ export const GoogleSheetsDialog = ({
 
             <DialogFooter className="flex items-center justify-between">
               <Button type="button" variant="outline" onClick={handleSendTestRow}>
-                Send test row
+                Append test row to sheet
               </Button>
               <Button type="submit">Save</Button>
             </DialogFooter>
@@ -640,5 +700,6 @@ export const GoogleSheetsDialog = ({
         </Form>
       </DialogContent>
     </Dialog>
+    </>
   );
 };

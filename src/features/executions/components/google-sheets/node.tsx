@@ -13,12 +13,14 @@ import type { WorkflowContext } from "@/features/executions/types";
 
 type GoogleSheetsNodeData = {
   spreadsheetId?: string;
+  sheetTitle?: string;
   range?: string;
   action?: "append" | "read";
   credentialId?: string;
   variableName?: string;
   values?: string;
   sourceVariable?: string;
+  columnMappings?: Record<string, string | undefined>;
   context?: WorkflowContext;
 };
 type GoogleSheetsNodeType = Node<GoogleSheetsNodeData>;
@@ -86,19 +88,20 @@ export const GoogleSheetsNode = memo((props: NodeProps<GoogleSheetsNodeType>) =>
     }
 
     const fields: { key: string; label: string; example?: string }[] = [];
-    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-      if (
-        typeof value === "string" ||
-        typeof value === "number" ||
-        typeof value === "boolean"
-      ) {
-        fields.push({
-          key,
-          label: key,
-          example: String(value),
-        });
+
+    function flatten(obj: Record<string, unknown>, prefix = "", depth = 0) {
+      if (depth > 3) return;
+      for (const [k, v] of Object.entries(obj)) {
+        const path = prefix ? `${prefix}.${k}` : k;
+        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          fields.push({ key: path, label: path, example: String(v) });
+        } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+          flatten(v as Record<string, unknown>, path, depth + 1);
+        }
       }
     }
+
+    flatten(data as Record<string, unknown>);
 
     return { savedResponseFields: fields, activeResponseName: preferredName };
   }, [props.id, edges, nodes]);

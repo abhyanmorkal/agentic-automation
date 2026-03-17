@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import prisma from "@/lib/db";
 import { sendWorkflowExecution } from "@/inngest/utils";
 import { NodeType } from "@/generated/prisma";
@@ -21,26 +22,23 @@ function decodeToken(rawToken: string): TokenPayload | null {
   }
 }
 
-async function parseRequestBody(request: NextRequest) {
-  const contentType = request.headers.get("content-type") || "";
-
+async function parseRequestBody(rawBody: Buffer, contentType: string, request: NextRequest) {
   if (contentType.includes("application/json")) {
     try {
       return {
         type: "json" as const,
-        body: await request.json(),
+        body: JSON.parse(rawBody.toString("utf8")) as unknown,
       };
     } catch {
       return {
         type: "json" as const,
-        body: {},
+        body: {} as unknown,
       };
     }
   }
 
   if (contentType.includes("application/x-www-form-urlencoded")) {
-    const text = await request.text();
-    const params = new URLSearchParams(text);
+    const params = new URLSearchParams(rawBody.toString("utf8"));
     const body: Record<string, unknown> = {};
     for (const [key, value] of params.entries()) {
       body[key] = value;
@@ -82,8 +80,8 @@ async function parseRequestBody(request: NextRequest) {
     };
   }
 
-  // Fallback: try text
-  const text = await request.text().catch(() => "");
+  // Fallback: raw text
+  const text = rawBody.toString("utf8");
   return {
     type: "text" as const,
     body: text ? { raw: text } : {},
@@ -121,13 +119,43 @@ export async function POST(
       );
     }
 
+    // Read raw body once so we can verify HMAC before parsing
+    const rawBody = Buffer.from(await request.arrayBuffer());
+
+    // HMAC signature verification (if a secret is configured)
+    const nodeData = (node.data ?? {}) as Record<string, unknown>;
+    const webhookSecret = typeof nodeData.webhookSecret === "string" && nodeData.webhookSecret
+      ? nodeData.webhookSecret
+      : null;
+
+    if (webhookSecret) {
+      const signature =
+        request.headers.get("x-webhook-signature") ??
+        request.headers.get("x-hub-signature-256") ??
+        "";
+      const hmac = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+      const expected = `sha256=${hmac}`;
+      const sigBuf = Buffer.from(signature);
+      const expBuf = Buffer.from(expected);
+      const valid =
+        sigBuf.length === expBuf.length &&
+        crypto.timingSafeEqual(sigBuf, expBuf);
+      if (!valid) {
+        return NextResponse.json(
+          { success: false, error: "Invalid signature" },
+          { status: 401 },
+        );
+      }
+    }
+
     const url = new URL(request.url);
     const query: Record<string, string> = {};
     url.searchParams.forEach((value, key) => {
       query[key] = value;
     });
 
-    const parsed = await parseRequestBody(request);
+    const contentType = request.headers.get("content-type") ?? "";
+    const parsed = await parseRequestBody(rawBody, contentType, request);
 
     const webhookData: Record<string, unknown> = {
       body: parsed.body,
@@ -143,11 +171,16 @@ export async function POST(
       webhookData.files = parsed.files;
     }
 
-    const nodeData = (node.data ?? {}) as Record<string, unknown>;
+    const existingHistory = Array.isArray(nodeData.webhookHistory)
+      ? (nodeData.webhookHistory as unknown[])
+      : [];
+    const webhookHistory = [webhookData, ...existingHistory].slice(0, 10);
+
     const updatedData: Record<string, unknown> = {
       ...nodeData,
       sampleResponseRaw: webhookData,
       lastSampleCapturedAt: new Date().toISOString(),
+      webhookHistory,
     };
 
     await prisma.node.update({
