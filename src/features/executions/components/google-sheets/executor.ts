@@ -164,7 +164,12 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
   const refreshToken = decrypt(credential.value);
   const action = data.action ?? "append";
   const spreadsheetId = data.spreadsheetId;
-  const range = decode(Handlebars.compile(data.range)(context));
+  let range = decode(Handlebars.compile(data.range)(context));
+  if (action === "append" && range.includes("!")) {
+    // For Appending, rigid bounds like Sheet1!A:C cause Google Sheets to discard mapping items beyond column C.
+    // We strip to just the Sheet Title so it dynamically detects the full table width and accepts infinite columns.
+    range = range.split("!")[0] ?? range;
+  }
 
   try {
     const result = await step.run("google-sheets-action", async () => {

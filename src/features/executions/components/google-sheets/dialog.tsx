@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCwIcon } from "lucide-react";
+import { RefreshCwIcon, Settings2Icon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -48,20 +48,20 @@ import type { VariableTree } from "@/features/executions/lib/variable-tree";
 import type { UpstreamSource } from "./types";
 
 const formSchema = z.object({
-  variableName: z.string().min(1, "Variable name is required").regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
-  credentialId: z.string().min(1, "Credential is required"),
-  spreadsheetId: z.string().min(1, "Spreadsheet is required"),
-  sheetTitle: z.string().min(1, "Sheet is required"),
-  range: z.string().min(1, "Range is required"),
+  variableName: z.string({ required_error: "Variable name is required" }).min(1, "Variable name is required").regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+  credentialId: z.string({ required_error: "Credential is required" }).min(1, "Credential is required"),
+  spreadsheetId: z.string({ required_error: "Spreadsheet is required" }).min(1, "Spreadsheet is required"),
+  sheetTitle: z.string({ required_error: "Sheet is required" }).min(1, "Sheet is required"),
+  range: z.string({ required_error: "Range is required" }).min(1, "Range is required"),
   action: z.enum(["append", "read"]),
   values: z.string().optional(),
   columnMappings: z.record(z.string(), z.string().optional()).optional(),
-  sourceVariable: z.string().min(1, "Source variable is required"),
+  sourceVariable: z.string({ required_error: "Please select a source trigger." }).min(1, "Source variable is required"),
   selectedResponseName: z.string().optional(),
   readFilter: z.object({
-    column: z.string(),
-    operator: z.string(),
-    value: z.string(),
+    column: z.string().optional(),
+    operator: z.string().optional(),
+    value: z.string().optional(),
   }).optional(),
   readOutputMapping: z.record(z.string(), z.string()).optional(),
 });
@@ -140,6 +140,7 @@ export const GoogleSheetsDialog = ({
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [loadingColumns, setLoadingColumns] = useState(false);
   const [testRowConfirm, setTestRowConfirm] = useState<{ rangeValue: string; testValues?: string[][] } | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Embedded Google OAuth popup flow (similar to Facebook)
   useEffect(() => {
@@ -304,28 +305,25 @@ export const GoogleSheetsDialog = ({
   const watchedSourceVariable = form.watch("sourceVariable") || "webhook";
 
   const handleSubmit = (values: GoogleSheetsFormValues) => {
-    // Keep range in sync with selected sheet if not manually overridden.
-    const sheetTitle = values.sheetTitle;
-    const range = sheetTitle ? `${sheetTitle}!A:Z` : values.range;
+    // Rely on values.range if user overrode it. Otherwise, default to the whole sheet Title allowing infinite columns without the A:Z cutoff.
+    const isDefaultRange = !values.range || values.range.endsWith("!A:Z");
+    const range = isDefaultRange && values.sheetTitle ? values.sheetTitle : values.range || "Sheet1";
 
     let finalValues = values.values;
+    const submittedMappings = values.columnMappings || {};
+
     if (
       values.action === "append" &&
       columns.length > 0 &&
-      Object.keys(columnMappings).length > 0 &&
+      Object.keys(submittedMappings).length > 0 &&
       savedResponseFields.length > 0
     ) {
       const sourceKey = values.sourceVariable || "webhook";
       const row = columns.map((col) => {
-        const key = columnMappings[col];
+        const key = submittedMappings[col];
         if (!key) return "";
         // Build a Handlebars template that references the LIVE incoming data,
         // NOT the saved design-time sample.
-        //
-        // Runtime context structure per source type:
-        //   Webhook:        context.webhook.body.{key}
-        //   Facebook Lead:  context.facebookLead.fields.{key}
-        //   Others:         context.{sourceKey}.body.{key}  (fallback)
         if (sourceKey === "facebookLead") {
           return `{{${sourceKey}.fields.${key}}}`;
         }
@@ -449,9 +447,6 @@ export const GoogleSheetsDialog = ({
                   <FormItem>
                     <FormLabel>Variable Name</FormLabel>
                     <FormControl><Input placeholder="mySheets" {...field} /></FormControl>
-                    <FormDescription>
-                      Result will be available as {`{{${varName}}}`} in later nodes.
-                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -506,72 +501,7 @@ export const GoogleSheetsDialog = ({
                   </FormItem>
                 )} />
 
-                <FormField control={form.control} name="sourceVariable" render={({ field }) => {
-                  return (
-                    <FormItem>
-                      <FormLabel>Source data</FormLabel>
-                      <Select
-                        onValueChange={(val) => {
-                          field.onChange(val);
-                          // Reset selected response when source changes
-                          form.setValue("selectedResponseName", "");
-                        }}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select source" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {upstreamSources.length > 0
-                            ? upstreamSources.map((src) => (
-                                <SelectItem key={src.variableKey} value={src.variableKey}>
-                                  {src.label}
-                                </SelectItem>
-                              ))
-                            : (
-                              <>
-                                <SelectItem value="webhook">Webhook</SelectItem>
-                                <SelectItem value="facebookLead">Facebook Lead</SelectItem>
-                              </>
-                            )
-                          }
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>
-                        {upstreamSources.length === 0 ? "Connect a trigger node upstream to see sources." : ""}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  );
-                }} />
 
-                {allResponseNames.length > 0 && (
-                  <FormField control={form.control} name="selectedResponseName" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Saved response</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value || activeResponseName || ""}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select saved response" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {allResponseNames.map((name) => (
-                            <SelectItem key={name} value={name}>
-                              {name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>
-                        Choose which saved response to use for column mapping.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                )}
 
                 <FormField control={form.control} name="spreadsheetId" render={({ field }) => (
                   <FormItem>
@@ -662,14 +592,72 @@ export const GoogleSheetsDialog = ({
 
               {/* Right column: mapping & advanced controls */}
               <div className="space-y-5">
+                <FormField control={form.control} name="sourceVariable" render={({ field }) => {
+                  return (
+                    <FormItem>
+                      <FormLabel>Source data</FormLabel>
+                      <Select
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          // Reset selected response when source changes
+                          form.setValue("selectedResponseName", "");
+                        }}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select source" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {upstreamSources.length > 0
+                            ? upstreamSources.map((src) => (
+                                <SelectItem key={src.variableKey} value={src.variableKey}>
+                                  {src.label}
+                                </SelectItem>
+                              ))
+                            : (
+                              <>
+                                <SelectItem value="webhook">Webhook</SelectItem>
+                                <SelectItem value="facebookLead">Facebook Lead</SelectItem>
+                              </>
+                            )
+                          }
+                        </SelectContent>
+                      </Select>
+                      {upstreamSources.length === 0 && <span className="text-xs text-muted-foreground mt-1 block">Connect a trigger node upstream to see sources.</span>}
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }} />
+
+                {allResponseNames.length > 0 && (
+                  <FormField control={form.control} name="selectedResponseName" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Saved response</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || activeResponseName || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select saved response" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {allResponseNames.map((name) => (
+                            <SelectItem key={name} value={name}>
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                )}
                 {action === "append" && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex flex-col gap-0.5">
                         <FormLabel>Column mapping</FormLabel>
-                        <span className="text-xs text-muted-foreground">
-                          Map fields from <span className="font-medium">{activeResponseName ?? "saved response"}</span>{selectedSource ? ` (${selectedSource.label})` : ""} to each column.
-                        </span>
                       </div>
                       <Button
                         type="button"
@@ -756,9 +744,6 @@ export const GoogleSheetsDialog = ({
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <FormLabel>Find row where</FormLabel>
-                      <span className="text-xs text-muted-foreground block">
-                        Filter returned rows by matching a column value. Leave column blank to return all rows.
-                      </span>
                       <div className="grid grid-cols-3 gap-2">
                         <FormField
                           control={form.control}
@@ -815,10 +800,6 @@ export const GoogleSheetsDialog = ({
                       <div className="flex items-center justify-between">
                         <div className="flex flex-col gap-0.5">
                           <FormLabel>Output mapping</FormLabel>
-                          <span className="text-xs text-muted-foreground">
-                            Map sheet columns to variable names. Access via{" "}
-                            <code className="bg-muted px-1 rounded text-[11px]">{`{{${varName}.row.YourVarName}}`}</code>
-                          </span>
                         </div>
                         <Button
                           type="button"
@@ -869,37 +850,47 @@ export const GoogleSheetsDialog = ({
                   </div>
                 )}
 
-                <div className="space-y-4">
-                  <FormField control={form.control} name="range" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Range (advanced)</FormLabel>
-                      <FormControl><Input placeholder="Sheet1!A:Z" {...field} /></FormControl>
-                      <FormDescription>
-                        Where to read or write rows, e.g. `Sheet1!A:Z`. Usually autofilled from the selected sheet.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
+                <div className="pt-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="flex items-center gap-2 text-muted-foreground w-full justify-start hover:bg-muted"
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                  >
+                    <Settings2Icon className="h-4 w-4" />
+                    Advanced settings
+                    {showAdvanced ? <ChevronUpIcon className="h-4 w-4 ml-auto" /> : <ChevronDownIcon className="h-4 w-4 ml-auto" />}
+                  </Button>
+                </div>
 
-                  {action === "append" && (
-                    <FormField control={form.control} name="values" render={({ field }) => (
+                {showAdvanced && (
+                  <div className="space-y-4 pt-2 border-t mt-4 fadeIn border-t border-muted">
+                    <FormField control={form.control} name="range" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Raw values JSON (optional)</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder={`[["{{${varName}.Email}}", "{{${varName}.FirstName}}"]]`}
-                            className="min-h-[96px] font-mono text-sm"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Normally built automatically from the column mapping. Edit only if you need full custom JSON.
-                        </FormDescription>
+                        <FormLabel>Manual Range Override</FormLabel>
+                        <FormControl><Input placeholder="Sheet1!A:Z" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )} />
-                  )}
-                </div>
+
+                    {action === "append" && (
+                      <FormField control={form.control} name="values" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Raw JSON values</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder={`[["{{${varName}.Email}}", "{{${varName}.FirstName}}"]]`}
+                              className="min-h-[96px] font-mono text-sm"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
