@@ -1,6 +1,6 @@
 import ky from "ky";
 
-const FB_API = "https://graph.facebook.com/v20.0";
+const FB_API = "https://graph.facebook.com/v22.0";
 
 /**
  * Facebook OAuth flow — two modes depending on FACEBOOK_CONFIG_ID:
@@ -71,7 +71,7 @@ export async function exchangeCodeForToken(code: string): Promise<string> {
 /**
  * Exchange a short-lived user token (~1h) for a long-lived token (~60 days).
  */
-export async function exchangeForLongLivedToken(shortLivedToken: string): Promise<string> {
+export async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ access_token: string; expires_in: number }> {
   const appId = process.env.FACEBOOK_APP_ID;
   const appSecret = process.env.FACEBOOK_APP_SECRET;
 
@@ -88,7 +88,7 @@ export async function exchangeForLongLivedToken(shortLivedToken: string): Promis
     })
     .json<{ access_token: string; token_type: string; expires_in: number }>();
 
-  return response.access_token;
+  return { access_token: response.access_token, expires_in: response.expires_in };
 }
 
 /**

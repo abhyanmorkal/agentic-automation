@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CopyIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
+import { CopyIcon, Loader2Icon, RefreshCwIcon, AlertTriangleIcon } from "lucide-react";
 import z from "zod";
 
 import {
@@ -50,6 +50,7 @@ import {
   fetchFacebookLeadForms,
   fetchFacebookSampleLead,
   testFacebookConnection,
+  fetchCredentialExpiry,
   type FacebookPage,
   type FacebookLeadForm,
   type FacebookSampleLead,
@@ -95,6 +96,7 @@ export const FacebookLeadTriggerDialog = ({
   const [connectingFb, setConnectingFb] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [tokenExpiry, setTokenExpiry] = useState<{ daysRemaining: number | null; warning: boolean } | null>(null);
   const [loadingPages, startLoadingPages] = useTransition();
   const [loadingForms, startLoadingForms] = useTransition();
   const [loadingSample, startLoadingSample] = useTransition();
@@ -195,6 +197,18 @@ export const FacebookLeadTriggerDialog = ({
       }
     }, 500);
   };
+
+  // Check token expiry when credential changes
+  useEffect(() => {
+    if (!watchedCredentialId) {
+      setTokenExpiry(null);
+      return;
+    }
+    fetchCredentialExpiry(watchedCredentialId)
+      .then((result) => setTokenExpiry({ daysRemaining: result.daysRemaining, warning: result.warning }))
+      .catch(() => setTokenExpiry(null));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedCredentialId]);
 
   // Load pages when credential changes
   useEffect(() => {
@@ -354,19 +368,38 @@ export const FacebookLeadTriggerDialog = ({
                 )}
               />
               {watchedCredentialId && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1.5 text-muted-foreground"
-                  onClick={handleTestConnection}
-                  disabled={testingConnection}
-                >
-                  {testingConnection ? (
-                    <Loader2Icon className="size-3 animate-spin" />
-                  ) : null}
-                  {testingConnection ? "Testing…" : "Test connection"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1.5 text-muted-foreground"
+                    onClick={handleTestConnection}
+                    disabled={testingConnection}
+                  >
+                    {testingConnection ? (
+                      <Loader2Icon className="size-3 animate-spin" />
+                    ) : null}
+                    {testingConnection ? "Testing…" : "Test connection"}
+                  </Button>
+                  {tokenExpiry?.daysRemaining !== null && tokenExpiry?.daysRemaining !== undefined && (
+                    <Badge
+                      variant="secondary"
+                      className={
+                        tokenExpiry.daysRemaining === 0
+                          ? "text-[10px] bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400 border-red-200 dark:border-red-800 gap-1"
+                          : tokenExpiry.warning
+                          ? "text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400 border-amber-200 dark:border-amber-800 gap-1"
+                          : "text-[10px] gap-1"
+                      }
+                    >
+                      {tokenExpiry.warning && <AlertTriangleIcon className="size-3" />}
+                      {tokenExpiry.daysRemaining === 0
+                        ? "Token expired — reconnect"
+                        : `Token expires in ${tokenExpiry.daysRemaining}d`}
+                    </Badge>
+                  )}
+                </div>
               )}
               <Button
                 type="button"

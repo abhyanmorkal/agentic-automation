@@ -81,6 +81,7 @@ model Credential {
   name String
   value String
   type CredentialType
+  metadata Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

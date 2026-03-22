@@ -11,6 +11,72 @@ Handlebars.registerHelper("json", (context) => {
   return new Handlebars.SafeString(JSON.stringify(context, null, 2));
 });
 
+/**
+ * Resolve a dotted/bracketed path like `webhook.savedResponses['Response A'].data.email`
+ * against a context object. Returns the resolved value or "" if the path doesn't exist.
+ */
+function resolvePath(obj: unknown, path: string): string {
+  // Split the path into segments, handling both dot notation and bracket notation
+  // e.g. "webhook.savedResponses['Response A'].data.email"
+  // becomes ["webhook", "savedResponses", "Response A", "data", "email"]
+  const segments: string[] = [];
+  const re = /\[['"](.+?)['"]\]|([^.\[\]]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(path)) !== null) {
+    segments.push(match[1] ?? match[2]!);
+  }
+
+  let current: unknown = obj;
+  for (const seg of segments) {
+    if (current === null || current === undefined || typeof current !== "object") {
+      return "";
+    }
+    current = (current as Record<string, unknown>)[seg];
+  }
+
+  if (current === null || current === undefined) return "";
+  if (typeof current === "object") return JSON.stringify(current);
+  return String(current);
+}
+
+/**
+ * Pre-process a template string by resolving any `{{path}}` expressions that contain
+ * bracket notation (which Handlebars can't parse) directly from the context.
+ * Standard dot-notation expressions are left for Handlebars to handle.
+ */
+function resolveTemplateValues(template: string, context: Record<string, unknown>): string {
+  // Backward compatibility: automatically upgrade old templates that refer to 
+  // design-time saved responses to instead use the live execution data paths.
+  let upgradedTemplate = template;
+  
+  // Upgrades: {{webhook.savedResponses['Response A'].data.email}} -> {{webhook.body.email}}
+  upgradedTemplate = upgradedTemplate.replace(
+    /\{\{\s*webhook\.savedResponses\[.*?\]\.data\.(.*?)\s*\}\}/g,
+    "{{webhook.body.$1}}"
+  );
+
+  // Upgrades: {{facebookLead.savedResponses['X'].data.email}} -> {{facebookLead.fields.email}}
+  // Note: While facebookLead used sampleResponseSimple/Advanced, we mapped it to savedResponse 
+  // virtually in the frontend, so it might have been saved in this format if a user updated during development.
+  upgradedTemplate = upgradedTemplate.replace(
+    /\{\{\s*facebookLead\.savedResponses\[.*?\]\.data\.(.*?)\s*\}\}/g,
+    "{{facebookLead.fields.$1}}"
+  );
+
+  // First pass: resolve any remaining bracket-notation expressions manually
+  const resolved = upgradedTemplate.replace(/\{\{([^}]*\[.*?\][^}]*)\}\}/g, (_match, path: string) => {
+    return resolvePath(context, path.trim());
+  });
+
+  // Second pass: let Handlebars handle any remaining standard expressions
+  try {
+    return decode(Handlebars.compile(resolved)(context));
+  } catch {
+    // If Handlebars still fails, return the manually resolved string
+    return decode(resolved);
+  }
+}
+
 type GoogleSheetsData = {
   variableName?: string;
   credentialId?: string;
@@ -21,6 +87,8 @@ type GoogleSheetsData = {
   action?: "append" | "read";
   sourceVariable?: string;
   columnMappings?: Record<string, string | undefined>;
+  readFilter?: { column: string; operator: string; value: string };
+  readOutputMapping?: Record<string, string>;
 };
 
 async function getAccessToken(refreshToken: string): Promise<string> {
@@ -35,6 +103,27 @@ async function getAccessToken(refreshToken: string): Promise<string> {
     })
     .json<{ access_token: string }>();
   return res.access_token;
+}
+
+function matchesFilter(
+  cellValue: string,
+  operator: string,
+  filterValue: string,
+): boolean {
+  const cell = cellValue.toLowerCase();
+  const filter = filterValue.toLowerCase();
+  switch (operator) {
+    case "equals":
+      return cell === filter;
+    case "contains":
+      return cell.includes(filter);
+    case "starts_with":
+      return cell.startsWith(filter);
+    case "ends_with":
+      return cell.endsWith(filter);
+    default:
+      return cell === filter;
+  }
 }
 
 export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
@@ -89,16 +178,65 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
           )
           .json<{ values: string[][] }>();
 
+        let rows = response.values ?? [];
+        const headers = rows[0] ?? [];
+        let dataRows = rows.slice(1);
+
+        // Apply row filter if configured
+        const filter = data.readFilter;
+        if (filter?.column && filter.value) {
+          const colIndex = headers.indexOf(filter.column);
+          if (colIndex >= 0) {
+            const filterValue = resolveTemplateValues(filter.value, context as Record<string, unknown>);
+            dataRows = dataRows.filter((row) =>
+              matchesFilter(row[colIndex] ?? "", filter.operator, filterValue),
+            );
+          }
+        }
+
+        // Apply output mapping if configured
+        const outputMapping = data.readOutputMapping;
+        const hasMapping = outputMapping && Object.values(outputMapping).some((v) => v);
+
+        if (hasMapping) {
+          const mappedRows = dataRows.map((row) => {
+            const mapped: Record<string, string> = {};
+            for (const [col, varName] of Object.entries(outputMapping)) {
+              if (!varName) continue;
+              const colIdx = headers.indexOf(col);
+              mapped[varName] = colIdx >= 0 ? (row[colIdx] ?? "") : "";
+            }
+            return mapped;
+          });
+
+          return {
+            ...context,
+            [data.variableName!]: {
+              rows: mappedRows,
+              row: mappedRows[0] ?? {},
+              totalRows: mappedRows.length,
+              headers,
+              range,
+            },
+          };
+        }
+
         return {
           ...context,
-          [data.variableName!]: { values: response.values ?? [], range },
+          [data.variableName!]: {
+            values: dataRows,
+            row: dataRows[0] ?? [],
+            totalRows: dataRows.length,
+            headers,
+            range,
+          },
         };
       }
 
       // Append
       let parsedValues: string[][] = [[]];
       if (data.values) {
-        const resolvedValues = decode(Handlebars.compile(data.values)(context));
+        const resolvedValues = resolveTemplateValues(data.values, context as Record<string, unknown>);
         try {
           parsedValues = JSON.parse(resolvedValues);
         } catch {

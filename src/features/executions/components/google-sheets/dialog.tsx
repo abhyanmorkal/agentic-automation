@@ -1,5 +1,6 @@
 "use client";
 
+import { RefreshCwIcon } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,7 @@ import {
   fetchGoogleSpreadsheets,
 } from "./actions";
 import type { VariableTree } from "@/features/executions/lib/variable-tree";
+import type { UpstreamSource } from "./types";
 
 const formSchema = z.object({
   variableName: z.string().min(1, "Variable name is required").regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
@@ -55,6 +57,13 @@ const formSchema = z.object({
   values: z.string().optional(),
   columnMappings: z.record(z.string(), z.string().optional()).optional(),
   sourceVariable: z.string().min(1, "Source variable is required"),
+  selectedResponseName: z.string().optional(),
+  readFilter: z.object({
+    column: z.string(),
+    operator: z.string(),
+    value: z.string(),
+  }).optional(),
+  readOutputMapping: z.record(z.string(), z.string()).optional(),
 });
 
 export type GoogleSheetsFormValues = z.infer<typeof formSchema>;
@@ -65,8 +74,10 @@ interface Props {
   onSubmit: (values: GoogleSheetsFormValues) => void;
   defaultValues?: Partial<GoogleSheetsFormValues>;
   availableVariables?: VariableTree;
+  upstreamSources?: UpstreamSource[];
   savedResponseFields?: { key: string; label: string; example?: string }[];
   activeResponseName?: string;
+  allResponseNames?: string[];
 }
 
 export const GoogleSheetsDialog = ({
@@ -75,8 +86,10 @@ export const GoogleSheetsDialog = ({
   onSubmit,
   defaultValues = {},
   availableVariables = {},
+  upstreamSources = [],
   savedResponseFields = [],
   activeResponseName,
+  allResponseNames = [],
 }: Props) => {
   const {
     data: credentials,
@@ -96,7 +109,10 @@ export const GoogleSheetsDialog = ({
       action: defaultValues.action ?? "append",
       values: defaultValues.values ?? '[["Value 1", "Value 2"]]',
       columnMappings: defaultValues.columnMappings ?? {},
-      sourceVariable: defaultValues.sourceVariable ?? "webhook",
+      sourceVariable: defaultValues.sourceVariable ?? (upstreamSources[0]?.variableKey || "webhook"),
+      selectedResponseName: defaultValues.selectedResponseName ?? "",
+      readFilter: defaultValues.readFilter ?? { column: "", operator: "equals", value: "" },
+      readOutputMapping: defaultValues.readOutputMapping ?? {},
     },
   });
 
@@ -110,9 +126,12 @@ export const GoogleSheetsDialog = ({
       action: defaultValues.action ?? "append",
       values: defaultValues.values ?? '[["Value 1", "Value 2"]]',
       columnMappings: defaultValues.columnMappings ?? {},
-      sourceVariable: defaultValues.sourceVariable ?? "webhook",
+      sourceVariable: defaultValues.sourceVariable ?? (upstreamSources[0]?.variableKey || "webhook"),
+      selectedResponseName: defaultValues.selectedResponseName ?? "",
+      readFilter: defaultValues.readFilter ?? { column: "", operator: "equals", value: "" },
+      readOutputMapping: defaultValues.readOutputMapping ?? {},
     });
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues, form, upstreamSources]);
 
   const [spreadsheets, setSpreadsheets] = useState<{ id: string; name: string }[]>([]);
   const [sheets, setSheets] = useState<{ title: string }[]>([]);
@@ -266,7 +285,23 @@ export const GoogleSheetsDialog = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedCredentialId, watchedSpreadsheetId, watchedSheetTitle]);
 
+  const handleRefreshColumns = () => {
+    if (!watchedCredentialId || !watchedSpreadsheetId || !watchedSheetTitle) return;
+    setLoadingColumns(true);
+    fetchGoogleSheetColumns(watchedCredentialId, watchedSpreadsheetId, watchedSheetTitle)
+      .then((cols) => {
+        setColumns(cols);
+        toast.success("Columns refreshed");
+      })
+      .catch(() => {
+        toast.error("Failed to load header row from this sheet.");
+        setColumns([]);
+      })
+      .finally(() => setLoadingColumns(false));
+  };
+
   const columnMappings = form.watch("columnMappings") || {};
+  const watchedSourceVariable = form.watch("sourceVariable") || "webhook";
 
   const handleSubmit = (values: GoogleSheetsFormValues) => {
     // Keep range in sync with selected sheet if not manually overridden.
@@ -278,15 +313,23 @@ export const GoogleSheetsDialog = ({
       values.action === "append" &&
       columns.length > 0 &&
       Object.keys(columnMappings).length > 0 &&
-      savedResponseFields.length > 0 &&
-      activeResponseName
+      savedResponseFields.length > 0
     ) {
-      const responseName = activeResponseName;
+      const sourceKey = values.sourceVariable || "webhook";
       const row = columns.map((col) => {
         const key = columnMappings[col];
         if (!key) return "";
-        // Build a template that pulls from the saved webhook response.
-        return `{{webhook.savedResponses['${responseName}'].data.${key}}}`;
+        // Build a Handlebars template that references the LIVE incoming data,
+        // NOT the saved design-time sample.
+        //
+        // Runtime context structure per source type:
+        //   Webhook:        context.webhook.body.{key}
+        //   Facebook Lead:  context.facebookLead.fields.{key}
+        //   Others:         context.{sourceKey}.body.{key}  (fallback)
+        if (sourceKey === "facebookLead") {
+          return `{{${sourceKey}.fields.${key}}}`;
+        }
+        return `{{${sourceKey}.body.${key}}}`;
       });
       finalValues = JSON.stringify([row]);
     }
@@ -357,6 +400,7 @@ export const GoogleSheetsDialog = ({
   };
 
   const hasSavedResponseFields = savedResponseFields.length > 0 && !!activeResponseName;
+  const selectedSource = upstreamSources.find((s) => s.variableKey === watchedSourceVariable);
 
   return (
     <>
@@ -463,31 +507,71 @@ export const GoogleSheetsDialog = ({
                 )} />
 
                 <FormField control={form.control} name="sourceVariable" render={({ field }) => {
-                  const sourceKeys = Object.keys(availableVariables);
-                  const options = sourceKeys.length > 0
-                    ? sourceKeys
-                    : ["webhook", "facebookLead"];
                   return (
                     <FormItem>
                       <FormLabel>Source data</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          // Reset selected response when source changes
+                          form.setValue("selectedResponseName", "");
+                        }}
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select source variable" />
+                            <SelectValue placeholder="Select source" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {options.map((key) => (
-                            <SelectItem key={key} value={key}>
-                              {key}
-                            </SelectItem>
-                          ))}
+                          {upstreamSources.length > 0
+                            ? upstreamSources.map((src) => (
+                                <SelectItem key={src.variableKey} value={src.variableKey}>
+                                  {src.label}
+                                </SelectItem>
+                              ))
+                            : (
+                              <>
+                                <SelectItem value="webhook">Webhook</SelectItem>
+                                <SelectItem value="facebookLead">Facebook Lead</SelectItem>
+                              </>
+                            )
+                          }
                         </SelectContent>
                       </Select>
+                      <FormDescription>
+                        {upstreamSources.length === 0 ? "Connect a trigger node upstream to see sources." : ""}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   );
                 }} />
+
+                {allResponseNames.length > 0 && (
+                  <FormField control={form.control} name="selectedResponseName" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Saved response</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || activeResponseName || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select saved response" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {allResponseNames.map((name) => (
+                            <SelectItem key={name} value={name}>
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Choose which saved response to use for column mapping.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                )}
 
                 <FormField control={form.control} name="spreadsheetId" render={({ field }) => (
                   <FormItem>
@@ -584,9 +668,21 @@ export const GoogleSheetsDialog = ({
                       <div className="flex flex-col gap-0.5">
                         <FormLabel>Column mapping</FormLabel>
                         <span className="text-xs text-muted-foreground">
-                          Choose which field from the saved webhook response should populate each column.
+                          Map fields from <span className="font-medium">{activeResponseName ?? "saved response"}</span>{selectedSource ? ` (${selectedSource.label})` : ""} to each column.
                         </span>
                       </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        disabled={loadingColumns || !watchedSheetTitle}
+                        onClick={handleRefreshColumns}
+                        title="Refresh Columns"
+                      >
+                        <RefreshCwIcon className={`h-3 w-3 ${loadingColumns ? "animate-spin" : ""}`} />
+                        <span className="sr-only">Refresh Columns</span>
+                      </Button>
                     </div>
                     {columns.length > 0 && Object.keys(columnMappings).length > 0 && (() => {
                       const unmapped = columns.filter((col) => !columnMappings[col]);
@@ -645,13 +741,130 @@ export const GoogleSheetsDialog = ({
                               </div>
                               {!hasSavedResponseFields && (
                                 <p className="text-[11px] text-muted-foreground">
-                                  Capture and save a webhook response first to enable mapping.
+                                  Capture and save a response in the upstream trigger node first to enable mapping.
                                 </p>
                               )}
                             </FormItem>
                           )}
                         />
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {action === "read" && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <FormLabel>Find row where</FormLabel>
+                      <span className="text-xs text-muted-foreground block">
+                        Filter returned rows by matching a column value. Leave column blank to return all rows.
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        <FormField
+                          control={form.control}
+                          name="readFilter.column"
+                          render={({ field }) => (
+                            <Select value={field.value ?? ""} onValueChange={field.onChange} disabled={columns.length === 0}>
+                              <SelectTrigger>
+                                <SelectValue placeholder={columns.length === 0 ? "Load sheet first" : "Column"} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="">— None —</SelectItem>
+                                {columns.map((col) => (
+                                  <SelectItem key={col} value={col}>{col}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="readFilter.operator"
+                          render={({ field }) => (
+                            <Select value={field.value ?? "equals"} onValueChange={field.onChange}>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="equals">equals</SelectItem>
+                                <SelectItem value="contains">contains</SelectItem>
+                                <SelectItem value="starts_with">starts with</SelectItem>
+                                <SelectItem value="ends_with">ends with</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="readFilter.value"
+                          render={({ field }) => (
+                            <FormControl>
+                              <Input
+                                placeholder="Value to match"
+                                value={field.value ?? ""}
+                                onChange={field.onChange}
+                                className="text-sm"
+                              />
+                            </FormControl>
+                          )}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-0.5">
+                          <FormLabel>Output mapping</FormLabel>
+                          <span className="text-xs text-muted-foreground">
+                            Map sheet columns to variable names. Access via{" "}
+                            <code className="bg-muted px-1 rounded text-[11px]">{`{{${varName}.row.YourVarName}}`}</code>
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          disabled={loadingColumns || !watchedSheetTitle}
+                          onClick={handleRefreshColumns}
+                          title="Refresh Columns"
+                        >
+                          <RefreshCwIcon className={`h-3 w-3 ${loadingColumns ? "animate-spin" : ""}`} />
+                          <span className="sr-only">Refresh Columns</span>
+                        </Button>
+                      </div>
+                      <div className="border rounded-md p-3 max-h-60 overflow-auto space-y-2 bg-muted/40">
+                        {loadingColumns && (
+                          <p className="text-xs text-muted-foreground">Loading columns…</p>
+                        )}
+                        {!loadingColumns && columns.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Select a spreadsheet and sheet to load column headers.
+                          </p>
+                        )}
+                        {columns.map((col) => (
+                          <FormField
+                            key={col}
+                            control={form.control}
+                            name={`readOutputMapping.${col}` as const}
+                            render={({ field }) => (
+                              <FormItem className="space-y-1">
+                                <div className="grid grid-cols-[160px,1fr] items-center gap-2">
+                                  <FormLabel className="text-xs font-medium truncate">{col}</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      className="h-8 text-xs"
+                                      value={field.value ?? ""}
+                                      onChange={field.onChange}
+                                      placeholder={col.replace(/[^A-Za-z0-9_]/g, "_").toLowerCase()}
+                                    />
+                                  </FormControl>
+                                </div>
+                              </FormItem>
+                            )}
+                          />
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

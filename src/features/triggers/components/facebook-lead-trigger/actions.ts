@@ -166,3 +166,27 @@ export async function fetchFacebookSampleLead(
 
   return leadsResponse.data[0] ?? null;
 }
+
+export async function fetchCredentialExpiry(
+  credentialId: string,
+): Promise<{ expiresAt: string | null; daysRemaining: number | null; warning: boolean }> {
+  try {
+    const session = await getSession();
+    const credential = await prisma.credential.findUnique({
+      where: { id: credentialId, userId: session.user.id },
+    });
+    if (!credential) return { expiresAt: null, daysRemaining: null, warning: false };
+
+    const metadata = credential.metadata as { expiresAt?: string } | null;
+    const expiresAt = metadata?.expiresAt ?? null;
+    if (!expiresAt) return { expiresAt: null, daysRemaining: null, warning: false };
+
+    const msRemaining = new Date(expiresAt).getTime() - Date.now();
+    const daysRemaining = Math.max(0, Math.floor(msRemaining / (1000 * 60 * 60 * 24)));
+    const warning = daysRemaining <= 7;
+
+    return { expiresAt, daysRemaining, warning };
+  } catch {
+    return { expiresAt: null, daysRemaining: null, warning: false };
+  }
+}

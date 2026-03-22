@@ -64,7 +64,12 @@ export async function GET(request: Request) {
   try {
     // Exchange code → short-lived token → long-lived token (~60 days)
     const shortToken = await exchangeCodeForToken(code);
-    const longToken = await exchangeForLongLivedToken(shortToken);
+    const { access_token: longToken, expires_in: expiresIn } = await exchangeForLongLivedToken(shortToken);
+
+    // Compute absolute expiry timestamp
+    const expiresAt = expiresIn
+      ? new Date(Date.now() + expiresIn * 1000).toISOString()
+      : null;
 
     // Get Facebook user's name for labelling the credential
     const fbName = await getFacebookUserName(longToken).catch(() => null);
@@ -75,6 +80,7 @@ export async function GET(request: Request) {
         name,
         type: CredentialType.META_ACCESS_TOKEN,
         value: encrypt(longToken),
+        metadata: expiresAt ? { expiresAt } : undefined,
         userId,
       },
     });
