@@ -1,4 +1,4 @@
-import { exchangeCodeForToken, exchangeForLongLivedToken, getFacebookUserName } from "@/lib/facebook-oauth";
+import { exchangeCodeForToken, exchangeForLongLivedToken, getFacebookUserInfo } from "@/lib/facebook-oauth";
 import { encrypt } from "@/lib/encryption";
 import prisma from "@/lib/db";
 import { CredentialType } from "@/generated/prisma";
@@ -71,19 +71,64 @@ export async function GET(request: Request) {
       ? new Date(Date.now() + expiresIn * 1000).toISOString()
       : null;
 
-    // Get Facebook user's name for labelling the credential
-    const fbName = await getFacebookUserName(longToken).catch(() => null);
+    // Get Facebook user's ID and name for labelling + deduplication
+    const fbUser = await getFacebookUserInfo(longToken).catch(() => null);
+    const fbName = fbUser?.name ?? null;
+    const facebookUserId = fbUser?.id ?? null;
     const name = fbName ? `Facebook — ${fbName}` : credentialName;
 
-    const credential = await prisma.credential.create({
-      data: {
-        name,
-        type: CredentialType.META_ACCESS_TOKEN,
-        value: encrypt(longToken),
-        metadata: expiresAt ? { expiresAt } : undefined,
-        userId,
-      },
-    });
+    // Build metadata — always include facebookUserId so we can deduplicate
+    const metadata: Record<string, string> = {};
+    if (expiresAt) metadata.expiresAt = expiresAt;
+    if (facebookUserId) metadata.facebookUserId = facebookUserId;
+
+    // Use upsert so that reconnecting the same Facebook account
+    // refreshes the token instead of creating a duplicate credential.
+    // The unique key is the combination of userId + facebookUserId.
+    // Fall back to create if we couldn't fetch the Facebook user ID.
+    let credential;
+    if (facebookUserId) {
+      // Try to find an existing credential for this Facebook account
+      const existing = await prisma.credential.findFirst({
+        where: {
+          userId,
+          type: CredentialType.META_ACCESS_TOKEN,
+          metadata: { path: ["facebookUserId"], equals: facebookUserId },
+        },
+      });
+
+      if (existing) {
+        credential = await prisma.credential.update({
+          where: { id: existing.id },
+          data: {
+            name,
+            value: encrypt(longToken),
+            metadata,
+          },
+        });
+      } else {
+        credential = await prisma.credential.create({
+          data: {
+            name,
+            type: CredentialType.META_ACCESS_TOKEN,
+            value: encrypt(longToken),
+            metadata,
+            userId,
+          },
+        });
+      }
+    } else {
+      // No Facebook user ID — safe fallback, always create
+      credential = await prisma.credential.create({
+        data: {
+          name,
+          type: CredentialType.META_ACCESS_TOKEN,
+          value: encrypt(longToken),
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+          userId,
+        },
+      });
+    }
 
     return htmlResponse(
       `window.opener?.postMessage({type:'facebook_auth_success',credentialId:${JSON.stringify(credential.id)},credentialName:${JSON.stringify(credential.name)}},'*');setTimeout(()=>window.close(),800);`,

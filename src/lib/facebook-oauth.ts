@@ -3,20 +3,36 @@ import ky from "ky";
 const FB_API = "https://graph.facebook.com/v22.0";
 
 /**
- * Facebook OAuth flow — two modes depending on FACEBOOK_CONFIG_ID:
+ * Required scopes for Facebook Lead Ads.
  *
- * Mode 1 — Embedded Signup (preferred, use this when you have a Config ID):
- *   Set FACEBOOK_CONFIG_ID in .env (created in your App Dashboard under
- *   Facebook Login → Settings → "Login with Embedded Signup" config).
- *   Permissions are pre-configured in the Config and NOT passed as scope params.
- *   This is why passing scope= causes "Invalid Scopes" — don't mix them.
+ * These match what production integrations (e.g. Pabbly, Zapier) request:
+ *   - pages_show_list          — list pages the user manages
+ *   - leads_retrieval          — read lead form submissions  (Advanced Access)
+ *   - ads_management           — read ad campaigns / creatives
+ *   - pages_manage_ads         — manage page-level ad settings
+ *   - pages_read_engagement    — read page posts & engagement
+ *   - pages_manage_metadata    — subscribe pages to webhooks (Advanced Access)
+ *   - business_management      — access Business Manager portfolios
  *
- * Mode 2 — Standard OAuth (fallback, no Config ID):
- *   Each permission in FACEBOOK_APP_SCOPES must be individually enabled in
- *   App Review → Permissions and Features (even for dev-mode testing).
- *   Standard Access: pages_show_list, pages_manage_ads, pages_read_engagement
- *   Advanced Access: leads_retrieval, pages_manage_metadata (need App Review)
+ * All Advanced Access permissions require App Review before they work
+ * in production. In dev/test mode they work for accounts added as testers.
+ *
+ * Two modes depending on whether FACEBOOK_CONFIG_ID is set:
+ *
+ * Mode 1 — Standard OAuth (recommended for Lead Ads):
+ *   No FACEBOOK_CONFIG_ID in .env. Scopes are sent explicitly in the URL.
+ *   Uses prompt=consent so the permission screen always appears.
+ *
+ * Mode 2 — Embedded Signup (has a Config ID):
+ *   Set FACEBOOK_CONFIG_ID in .env. The config_id is sent alongside the
+ *   scopes so that the Embedded Signup UI is used. Facebook merges the two.
+ *   Note: scope + config_id together is valid on the standard dialog/oauth
+ *   endpoint (unlike the business login endpoint where they conflict).
  */
+
+/** The canonical scope list for Facebook Lead Ads integrations. */
+const LEAD_ADS_SCOPES =
+  "pages_show_list,leads_retrieval,ads_management,pages_manage_ads,pages_read_engagement,pages_manage_metadata,business_management";
 
 export function getFacebookAuthUrl(state: string): string {
   const appId = process.env.FACEBOOK_APP_ID;
@@ -25,26 +41,30 @@ export function getFacebookAuthUrl(state: string): string {
 
   if (!appId) throw new Error("FACEBOOK_APP_ID is not configured");
 
+  // Allow overriding the scope list via env, otherwise use the Lead Ads default.
+  const scopes = process.env.FACEBOOK_APP_SCOPES?.trim() || LEAD_ADS_SCOPES;
+
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: `${appUrl}/api/auth/facebook/callback`,
     state,
     response_type: "code",
     display: "popup",
+    scope: scopes,
+    // prompt=consent ensures the permission screen always shows so the user
+    // can grant every requested scope (mirrors Pabbly/Zapier behaviour).
+    prompt: "consent",
   });
 
   if (configId) {
-    // Embedded Signup: permissions are baked into the Config ID — do NOT add scope.
+    // When an Embedded Signup config is present, attach it so the Meta
+    // Business Login UI is used. Scope is still sent — Facebook accepts
+    // both params on the standard dialog/oauth endpoint.
     params.set("config_id", configId);
-  } else {
-    // Standard OAuth: specify scopes. Each must be enabled in your App Dashboard first.
-    const scopes =
-      process.env.FACEBOOK_APP_SCOPES?.trim() ||
-      "email,public_profile,pages_show_list,pages_manage_ads,pages_read_engagement";
-    params.set("scope", scopes);
   }
 
-  return `https://www.facebook.com/dialog/oauth?${params.toString()}`;
+  // Use the versioned OAuth endpoint (same as Graph API version).
+  return `https://www.facebook.com/v22.0/dialog/oauth?${params.toString()}`;
 }
 
 export async function exchangeCodeForToken(code: string): Promise<string> {
@@ -92,9 +112,10 @@ export async function exchangeForLongLivedToken(shortLivedToken: string): Promis
 }
 
 /**
- * Get the Facebook user's name for naming the saved credential.
+ * Get the Facebook user's id and name.
+ * Used for labelling credentials and deduplication (same user → same credential row).
  */
-export async function getFacebookUserName(accessToken: string): Promise<string> {
+export async function getFacebookUserInfo(accessToken: string): Promise<{ id: string; name: string }> {
   const response = await ky
     .get(`${FB_API}/me`, {
       searchParams: {
@@ -104,5 +125,14 @@ export async function getFacebookUserName(accessToken: string): Promise<string> 
     })
     .json<{ id: string; name: string }>();
 
-  return response.name;
+  return { id: response.id, name: response.name };
+}
+
+/**
+ * Get the Facebook user's name for naming the saved credential.
+ * @deprecated Use getFacebookUserInfo instead.
+ */
+export async function getFacebookUserName(accessToken: string): Promise<string> {
+  const info = await getFacebookUserInfo(accessToken);
+  return info.name;
 }
