@@ -48,15 +48,15 @@ import type { VariableTree } from "@/features/executions/lib/variable-tree";
 import type { UpstreamSource } from "./types";
 
 const formSchema = z.object({
-  variableName: z.string({ required_error: "Variable name is required" }).min(1, "Variable name is required").regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
-  credentialId: z.string({ required_error: "Credential is required" }).min(1, "Credential is required"),
-  spreadsheetId: z.string({ required_error: "Spreadsheet is required" }).min(1, "Spreadsheet is required"),
-  sheetTitle: z.string({ required_error: "Sheet is required" }).min(1, "Sheet is required"),
-  range: z.string({ required_error: "Range is required" }).min(1, "Range is required"),
+  variableName: z.string().min(1, "Variable name is required").regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+  credentialId: z.string().min(1, "Credential is required"),
+  spreadsheetId: z.string().min(1, "Spreadsheet is required"),
+  sheetTitle: z.string().min(1, "Sheet is required"),
+  range: z.string().min(1, "Range is required"),
   action: z.enum(["append", "read"]),
   values: z.string().optional(),
   columnMappings: z.record(z.string(), z.string().optional()).optional(),
-  sourceVariable: z.string({ required_error: "Please select a source trigger." }).min(1, "Source variable is required"),
+  sourceVariable: z.string().min(1, "Source variable is required"),
   selectedResponseName: z.string().optional(),
   readFilter: z.object({
     column: z.string().optional(),
@@ -325,9 +325,9 @@ export const GoogleSheetsDialog = ({
         // Build a Handlebars template that references the LIVE incoming data,
         // NOT the saved design-time sample.
         if (sourceKey === "facebookLead") {
-          return `{{${sourceKey}.fields.${key}}}`;
+          return `{{${sourceKey}.fields.[${key}]}}`;
         }
-        return `{{${sourceKey}.body.${key}}}`;
+        return `{{${sourceKey}.body.[${key}]}}`;
       });
       finalValues = JSON.stringify([row]);
     }

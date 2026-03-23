@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     await prisma.node.update({
       where: { id: node.id },
       data: {
-        data: updatedData,
+        data: updatedData as any,
       },
     });
 

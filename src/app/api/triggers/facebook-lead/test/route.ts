@@ -3,14 +3,11 @@ import prisma from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { decrypt } from "@/lib/encryption";
 import ky from "ky";
-import { NodeType } from "@/generated/prisma";
 import { buildFacebookLeadSampleViews, type FacebookLeadSampleRaw } from "@/features/triggers/components/facebook-lead-trigger/formatters";
 
 const FB_API = "https://graph.facebook.com/v22.0";
 
 type RequestBody = {
-  workflowId: string;
-  nodeId: string;
   credentialId?: string;
   pageId?: string;
   formId?: string;
@@ -20,52 +17,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as RequestBody;
 
-    if (!body.workflowId || !body.nodeId) {
-      return NextResponse.json(
-        { error: "workflowId and nodeId are required" },
-        { status: 400 },
-      );
-    }
-
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const workflow = await prisma.workflow.findUnique({
-      where: {
-        id: body.workflowId,
-        userId: session.user.id,
-      },
-      include: {
-        nodes: true,
-      },
-    });
-
-    if (!workflow) {
-      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-    }
-
-    const node = workflow.nodes.find(
-      (n) => n.id === body.nodeId && n.type === NodeType.FACEBOOK_LEAD_TRIGGER,
-    );
-
-    if (!node) {
-      return NextResponse.json(
-        { error: "FACEBOOK_LEAD_TRIGGER node not found in this workflow" },
-        { status: 404 },
-      );
-    }
-
-    const nodeData = (node.data ?? {}) as Record<string, unknown>;
-
-    const credentialId =
-      body.credentialId ||
-      (typeof nodeData.credentialId === "string" ? nodeData.credentialId : node.credentialId);
-    const pageId =
-      body.pageId || (typeof nodeData.pageId === "string" ? nodeData.pageId : undefined);
-    const formId =
-      body.formId || (typeof nodeData.formId === "string" ? nodeData.formId : undefined);
+    const { credentialId, pageId, formId } = body;
 
     if (!credentialId || !pageId || !formId) {
       return NextResponse.json(
@@ -109,7 +66,7 @@ export async function POST(request: NextRequest) {
         searchParams: {
           access_token: pageToken,
           limit: "1",
-          fields: "id,created_time,field_data,form_id,page_id,ad_id",
+          fields: "id,created_time,field_data,form_id,ad_id",
         },
       })
       .json<{ data: FacebookLeadSampleRaw[] }>()
@@ -129,29 +86,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Graph API doesn't return page_id natively on leads, so we inject the one we know
+    if (!raw.page_id && pageId) {
+      raw.page_id = pageId;
+    }
+
     const views = buildFacebookLeadSampleViews(raw as FacebookLeadSampleRaw);
 
-    const updatedData: Record<string, unknown> = {
-      ...nodeData,
-      sampleResponseRaw: views.raw as unknown as Record<string, unknown>,
-      sampleResponseSimple: views.simple,
-      sampleResponseAdvanced: views.advanced,
-      lastSampleCapturedAt: new Date().toISOString(),
-    };
-
-    await prisma.node.update({
-      where: { id: node.id },
-      data: {
-        data: updatedData,
-      },
-    });
+    const lastSampleCapturedAt = new Date().toISOString();
 
     return NextResponse.json(
       {
         raw: views.raw,
         simple: views.simple,
         advanced: views.advanced,
-        lastSampleCapturedAt: updatedData.lastSampleCapturedAt,
+        lastSampleCapturedAt,
       },
       { status: 200 },
     );

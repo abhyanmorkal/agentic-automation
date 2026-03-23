@@ -190,3 +190,44 @@ export async function fetchCredentialExpiry(
     return { expiresAt: null, daysRemaining: null, warning: false };
   }
 }
+
+/**
+ * Automates the process of subscribing the Facebook App to the selected Page's leadgen webhook.
+ * This is REQUIRED for Facebook to send "Object: Page" (leadgen) webhooks to our endpoint.
+ */
+export async function setupFacebookLeadWebhook(credentialId: string, pageId: string) {
+  try {
+    const session = await getSession();
+    const userToken = await getDecryptedCredential(credentialId, session.user.id);
+
+    // 1. Get Page Access Token (we need this to perform page-level subscriptions)
+    const pageRes = await ky
+      .get(`https://graph.facebook.com/v22.0/${pageId}`, {
+        searchParams: {
+          access_token: userToken,
+          fields: "access_token",
+        },
+      })
+      .json<{ access_token: string }>()
+      .catch(parseFacebookError);
+
+    const pageToken = pageRes.access_token;
+
+    // 2. Subscribe our App to the Page's leadgen field
+    // This tells Facebook: "Send leadgen notifications for this page to the App's webhook URL"
+    await ky
+      .post(`https://graph.facebook.com/v22.0/${pageId}/subscribed_apps`, {
+        searchParams: {
+          access_token: pageToken,
+          subscribed_fields: "leadgen",
+        },
+      })
+      .json()
+      .catch(parseFacebookError);
+
+    return { success: true };
+  } catch (err) {
+    console.error("Facebook lead webhook setup failed:", err);
+    throw err;
+  }
+}

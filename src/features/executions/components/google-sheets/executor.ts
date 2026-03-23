@@ -20,7 +20,7 @@ function resolvePath(obj: unknown, path: string): string {
   // e.g. "webhook.savedResponses['Response A'].data.email"
   // becomes ["webhook", "savedResponses", "Response A", "data", "email"]
   const segments: string[] = [];
-  const re = /\[['"](.+?)['"]\]|([^.\[\]]+)/g;
+  const re = /\[['"]?(.+?)['"]?\]|([^.\[\]]+)/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(path)) !== null) {
     segments.push(match[1] ?? match[2]!);

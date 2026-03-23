@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
           .get(`${FB_API}/${leadgenId}`, {
             searchParams: {
               access_token: pageToken,
-              fields: "id,created_time,field_data,form_id,page_id,ad_id",
+              fields: "id,created_time,field_data,form_id,ad_id",
             },
           })
           .json<FacebookLeadData>()
@@ -143,6 +143,11 @@ export async function POST(request: NextRequest) {
         if (!lead) {
           console.error(`Failed to fetch lead data for leadgen_id ${leadgenId}`);
           continue;
+        }
+
+        // Graph API doesn't return page_id natively on leads, so we inject the one we know
+        if (!lead.page_id && pageId) {
+          lead.page_id = pageId;
         }
 
         // Flatten field_data into a key-value map
