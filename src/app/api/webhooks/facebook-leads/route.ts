@@ -4,23 +4,27 @@ import { NodeType } from "@/generated/prisma";
 import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
 import { decrypt } from "@/lib/encryption";
+import { decodeTriggerToken } from "@/lib/trigger-token";
+import { verifyFacebookSignature } from "@/lib/webhook-security";
 
 const VERIFY_TOKEN =
   process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN || "fb-lead-verify-token";
 const FB_API = "https://graph.facebook.com/v22.0";
 
-/**
- * GET — Facebook webhook verification handshake.
- * Facebook sends hub.mode, hub.verify_token, hub.challenge.
- * We echo back hub.challenge if the verify token matches.
- */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("hub.mode");
   const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
+  const triggerToken = searchParams.get("token");
 
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+  if (
+    mode === "subscribe" &&
+    token === VERIFY_TOKEN &&
+    challenge &&
+    triggerToken &&
+    decodeTriggerToken(triggerToken)
+  ) {
     return new Response(challenge, { status: 200 });
   }
 
@@ -56,28 +60,73 @@ type FacebookLeadData = {
   ad_id?: string;
 };
 
-/**
- * POST — Receive Facebook leadgen webhook events.
- * Parses the lead, fetches full field data from Graph API,
- * and triggers the associated workflow.
- */
 export async function POST(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const workflowId = searchParams.get("workflowId");
+    const triggerToken = searchParams.get("token");
+    const payload = triggerToken ? decodeTriggerToken(triggerToken) : null;
 
-    if (!workflowId) {
+    if (!payload) {
       return NextResponse.json(
-        { error: "Missing workflowId" },
+        { error: "Missing or invalid trigger token" },
         { status: 400 },
       );
     }
 
-    const body = (await request.json()) as FacebookLeadgenWebhook;
+    const rawBody = Buffer.from(await request.arrayBuffer());
+    if (
+      !verifyFacebookSignature(
+        rawBody,
+        request.headers.get("x-hub-signature-256"),
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Invalid Facebook signature" },
+        { status: 401 },
+      );
+    }
+
+    const body = JSON.parse(rawBody.toString("utf8")) as FacebookLeadgenWebhook;
 
     if (body.object !== "page") {
       return NextResponse.json({ success: true }, { status: 200 });
     }
+
+    const triggerNode = await prisma.node.findFirst({
+      where: {
+        id: payload.nodeId,
+        workflowId: payload.workflowId,
+        type: NodeType.FACEBOOK_LEAD_TRIGGER,
+      },
+    });
+
+    if (!triggerNode) {
+      return NextResponse.json(
+        { error: "Facebook Lead trigger node not found for this token" },
+        { status: 404 },
+      );
+    }
+
+    const nodeData = triggerNode.data as { credentialId?: string };
+    if (!nodeData.credentialId) {
+      return NextResponse.json(
+        { error: "Facebook Lead trigger is missing a credential" },
+        { status: 400 },
+      );
+    }
+
+    const credential = await prisma.credential.findUnique({
+      where: { id: nodeData.credentialId },
+    });
+
+    if (!credential) {
+      return NextResponse.json(
+        { error: "Credential not found" },
+        { status: 404 },
+      );
+    }
+
+    const userToken = decrypt(credential.value);
 
     for (const entry of body.entry) {
       for (const change of entry.changes) {
@@ -85,41 +134,6 @@ export async function POST(request: NextRequest) {
 
         const { leadgen_id: leadgenId, page_id: pageId } = change.value;
 
-        // Look up the workflow's FACEBOOK_LEAD_TRIGGER node to get the credential
-        const triggerNode = await prisma.node.findFirst({
-          where: {
-            workflowId,
-            type: NodeType.FACEBOOK_LEAD_TRIGGER,
-          },
-        });
-
-        if (!triggerNode) {
-          console.warn(
-            `No FACEBOOK_LEAD_TRIGGER node in workflow ${workflowId}`,
-          );
-          continue;
-        }
-
-        const nodeData = triggerNode.data as { credentialId?: string };
-        if (!nodeData.credentialId) {
-          console.warn(
-            `FACEBOOK_LEAD_TRIGGER node has no credentialId in workflow ${workflowId}`,
-          );
-          continue;
-        }
-
-        const credential = await prisma.credential.findUnique({
-          where: { id: nodeData.credentialId },
-        });
-
-        if (!credential) {
-          console.error(`Credential ${nodeData.credentialId} not found`);
-          continue;
-        }
-
-        const userToken = decrypt(credential.value);
-
-        // Exchange user token for page access token
         const pageData = await ky
           .get(`${FB_API}/${pageId}`, {
             searchParams: { access_token: userToken, fields: "access_token" },
@@ -129,19 +143,15 @@ export async function POST(request: NextRequest) {
 
         if (!pageData?.access_token) {
           console.error(
-            `[facebook-leads] Failed to fetch page access token for pageId=${pageId} in workflow=${workflowId}. ` +
-              `Ensure the credential has pages_read_engagement and pages_manage_ads permissions.`,
+            `[facebook-leads] Failed to fetch page access token for pageId=${pageId} in workflow=${payload.workflowId}.`,
           );
           continue;
         }
 
-        const pageToken = pageData.access_token;
-
-        // Fetch the full lead data
         const lead = await ky
           .get(`${FB_API}/${leadgenId}`, {
             searchParams: {
-              access_token: pageToken,
+              access_token: pageData.access_token,
               fields: "id,created_time,field_data,form_id,ad_id",
             },
           })
@@ -155,20 +165,17 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Graph API doesn't return page_id natively on leads, so we inject the one we know
         if (!lead.page_id && pageId) {
           lead.page_id = pageId;
         }
 
-        // Flatten field_data into a key-value map
         const fields: Record<string, string> = {};
         for (const field of lead.field_data ?? []) {
           fields[field.name] = field.values[0] ?? "";
         }
 
-        // Trigger the workflow
         await sendWorkflowExecution({
-          workflowId,
+          workflowId: payload.workflowId,
           triggerNodeId: triggerNode.id,
           triggerType: NodeType.FACEBOOK_LEAD_TRIGGER,
           initialData: {

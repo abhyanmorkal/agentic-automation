@@ -1,19 +1,40 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { NodeType } from "@/generated/prisma";
 import { sendWorkflowExecution } from "@/inngest/utils";
+import prisma from "@/lib/db";
+import { decodeTriggerToken } from "@/lib/trigger-token";
 
 export async function POST(request: NextRequest) {
   try {
     const url = new URL(request.url);
-    const workflowId = url.searchParams.get("workflowId");
+    const token = url.searchParams.get("token");
+    const payload = token ? decodeTriggerToken(token) : null;
 
-    if (!workflowId) {
+    if (!payload) {
       return NextResponse.json(
         {
           success: false,
-          error: "Missing required query parameter: workflowId",
+          error: "Missing or invalid trigger token",
         },
         { status: 400 },
+      );
+    }
+
+    const triggerNode = await prisma.node.findFirst({
+      where: {
+        id: payload.nodeId,
+        workflowId: payload.workflowId,
+        type: NodeType.WEBHOOK_TRIGGER,
+      },
+    });
+
+    if (!triggerNode) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Webhook trigger node not found for this token",
+        },
+        { status: 404 },
       );
     }
 
@@ -50,7 +71,8 @@ export async function POST(request: NextRequest) {
     };
 
     await sendWorkflowExecution({
-      workflowId,
+      workflowId: payload.workflowId,
+      triggerNodeId: triggerNode.id,
       triggerType: NodeType.WEBHOOK_TRIGGER,
       initialData: {
         webhook: webhookData,

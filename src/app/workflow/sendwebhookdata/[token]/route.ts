@@ -3,26 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { NodeType } from "@/generated/prisma";
 import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
-
-type TokenPayload = {
-  workflowId: string;
-  nodeId: string;
-};
-
-function decodeToken(rawToken: string): TokenPayload | null {
-  try {
-    const normalized = rawToken.endsWith("_pc")
-      ? rawToken.slice(0, -3)
-      : rawToken;
-    const decoded = Buffer.from(normalized, "base64").toString("utf8");
-    const json = decodeURIComponent(decoded);
-    const parsed = JSON.parse(json) as TokenPayload;
-    if (!parsed.workflowId || !parsed.nodeId) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
+import { decodeTriggerToken } from "@/lib/trigger-token";
 
 async function parseRequestBody(
   rawBody: Buffer,
@@ -100,7 +81,7 @@ export async function POST(
 ) {
   try {
     const { token } = await params;
-    const payload = decodeToken(token);
+    const payload = decodeTriggerToken(token);
     if (!payload) {
       return NextResponse.json(
         { success: false, error: "Invalid webhook token" },
@@ -233,7 +214,7 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  const payload = decodeToken(token);
+  const payload = decodeTriggerToken(token);
   if (!payload) {
     return NextResponse.json(
       { success: false, error: "Invalid webhook token" },
