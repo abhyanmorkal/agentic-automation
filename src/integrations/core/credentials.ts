@@ -12,6 +12,12 @@ type LoadCredentialOptions = {
   expectedType?: CredentialType;
 };
 
+type LoadCredentialForUserOptions = {
+  credentialId: string;
+  userId: string;
+  expectedType?: CredentialType;
+};
+
 export const loadCredential = async ({
   credentialId,
   userId,
@@ -33,6 +39,26 @@ export const loadCredential = async ({
     throw new NonRetriableError(
       `${nodeName}: Credential must be of type ${expectedType}`,
     );
+  }
+
+  return credential as unknown as Credential;
+};
+
+export const loadCredentialForUser = async ({
+  credentialId,
+  userId,
+  expectedType,
+}: LoadCredentialForUserOptions): Promise<Credential> => {
+  const credential = await prisma.credential.findUnique({
+    where: { id: credentialId, userId },
+  });
+
+  if (!credential) {
+    throw new Error("Credential not found");
+  }
+
+  if (expectedType && credential.type !== expectedType) {
+    throw new Error(`Credential must be of type ${expectedType}`);
   }
 
   return credential as unknown as Credential;

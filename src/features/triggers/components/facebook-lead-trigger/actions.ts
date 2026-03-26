@@ -1,16 +1,19 @@
 "use server";
 
 import type { Realtime } from "@inngest/realtime";
-import ky from "ky";
 import { headers } from "next/headers";
 import { facebookLeadTriggerChannel } from "@/inngest/channels/facebook-lead-trigger";
 import { safeGetToken } from "@/inngest/get-token";
 import {
-  getMetaAccessTokenForUser,
-  getMetaGraphUrl,
-  getMetaPageAccessToken,
-  parseMetaApiError,
-} from "@/integrations/meta/auth";
+  fetchMetaLeadForms,
+  fetchMetaPages,
+  type MetaFacebookLeadField,
+  type MetaFacebookLeadForm,
+  type MetaFacebookPage,
+  type MetaFacebookSampleLead,
+  subscribeMetaPageToLeadgenWebhook,
+  testMetaConnection,
+} from "@/integrations/meta/api";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/db";
 
@@ -25,31 +28,10 @@ export async function fetchFacebookLeadTriggerRealtimeToken(): Promise<FacebookL
   ]) as Promise<FacebookLeadTriggerToken | null>;
 }
 
-export type FacebookPage = {
-  id: string;
-  name: string;
-  category: string;
-  access_token: string;
-};
-
-export type FacebookLeadForm = {
-  id: string;
-  name: string;
-  status: string;
-  leads_count?: number;
-};
-
-export type FacebookLeadField = {
-  name: string;
-  values: string[];
-};
-
-export type FacebookSampleLead = {
-  id: string;
-  created_time: string;
-  field_data: FacebookLeadField[];
-  form_id: string;
-};
+export type FacebookPage = MetaFacebookPage;
+export type FacebookLeadForm = MetaFacebookLeadForm;
+export type FacebookLeadField = MetaFacebookLeadField;
+export type FacebookSampleLead = MetaFacebookSampleLead;
 
 async function getSession() {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -62,17 +44,12 @@ export async function testFacebookConnection(
 ): Promise<{ valid: boolean; name?: string; error?: string }> {
   try {
     const session = await getSession();
-    const accessToken = await getMetaAccessTokenForUser({
+    const result = await testMetaConnection({
       credentialId,
       userId: session.user.id,
     });
-    const res = await ky
-      .get(getMetaGraphUrl("me"), {
-        searchParams: { access_token: accessToken, fields: "id,name" },
-      })
-      .json<{ id: string; name?: string }>()
-      .catch(parseMetaApiError);
-    return { valid: true, name: res.name };
+
+    return { valid: true, name: result.name };
   } catch (err) {
     return {
       valid: false,
@@ -85,23 +62,11 @@ export async function fetchFacebookPages(
   credentialId: string,
 ): Promise<FacebookPage[]> {
   const session = await getSession();
-  const accessToken = await getMetaAccessTokenForUser({
+
+  return fetchMetaPages({
     credentialId,
     userId: session.user.id,
   });
-
-  const response = await ky
-    .get(getMetaGraphUrl("me/accounts"), {
-      searchParams: {
-        access_token: accessToken,
-        fields: "id,name,category,access_token",
-        limit: "50",
-      },
-    })
-    .json<{ data: FacebookPage[] }>()
-    .catch(parseMetaApiError);
-
-  return response.data;
 }
 
 export async function fetchFacebookLeadForms(
@@ -109,50 +74,12 @@ export async function fetchFacebookLeadForms(
   pageId: string,
 ): Promise<FacebookLeadForm[]> {
   const session = await getSession();
-  const pageToken = await getMetaPageAccessToken({
+
+  return fetchMetaLeadForms({
     credentialId,
     userId: session.user.id,
     pageId,
   });
-
-  const formsResponse = await ky
-    .get(getMetaGraphUrl(`${pageId}/leadgen_forms`), {
-      searchParams: {
-        access_token: pageToken,
-        fields: "id,name,status,leads_count",
-        limit: "50",
-      },
-    })
-    .json<{ data: FacebookLeadForm[] }>()
-    .catch(parseMetaApiError);
-
-  return formsResponse.data;
-}
-
-export async function fetchFacebookSampleLead(
-  credentialId: string,
-  pageId: string,
-  formId: string,
-): Promise<FacebookSampleLead | null> {
-  const session = await getSession();
-  const pageToken = await getMetaPageAccessToken({
-    credentialId,
-    userId: session.user.id,
-    pageId,
-  });
-
-  const leadsResponse = await ky
-    .get(getMetaGraphUrl(`${formId}/leads`), {
-      searchParams: {
-        access_token: pageToken,
-        limit: "1",
-        fields: "id,created_time,field_data,form_id",
-      },
-    })
-    .json<{ data: FacebookSampleLead[] }>()
-    .catch(parseMetaApiError);
-
-  return leadsResponse.data[0] ?? null;
 }
 
 export async function fetchCredentialExpiry(credentialId: string): Promise<{
@@ -196,21 +123,12 @@ export async function setupFacebookLeadWebhook(
 ) {
   try {
     const session = await getSession();
-    const pageToken = await getMetaPageAccessToken({
+
+    await subscribeMetaPageToLeadgenWebhook({
       credentialId,
       userId: session.user.id,
       pageId,
     });
-
-    await ky
-      .post(getMetaGraphUrl(`${pageId}/subscribed_apps`), {
-        searchParams: {
-          access_token: pageToken,
-          subscribed_fields: "leadgen",
-        },
-      })
-      .json()
-      .catch(parseMetaApiError);
 
     return { success: true };
   } catch (err) {

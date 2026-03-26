@@ -35,3 +35,17 @@ export const getConnectorById = (connectorId: ConnectorId) =>
 
 export const getConnectorForCredentialType = (credentialType: CredentialType) =>
   connectorDefinitionsByCredentialType[credentialType] ?? null;
+
+export const getRequiredConnectorForCredentialType = (
+  credentialType: CredentialType,
+) => {
+  const connector = getConnectorForCredentialType(credentialType);
+
+  if (!connector) {
+    throw new Error(
+      `No connector registered for credential type ${credentialType}`,
+    );
+  }
+
+  return connector;
+};

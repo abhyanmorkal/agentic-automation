@@ -52,6 +52,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
 import { CredentialType } from "@/generated/prisma";
+import { getRequiredConnectorForCredentialType } from "@/integrations/core/registry";
 import { encodeTriggerToken } from "@/lib/trigger-token";
 import { useTRPC } from "@/trpc/client";
 import {
@@ -118,6 +119,9 @@ export const FacebookLeadTriggerDialog = ({
   defaultValues = {},
   onSampleChange,
 }: Props) => {
+  const metaConnector = getRequiredConnectorForCredentialType(
+    CredentialType.META_ACCESS_TOKEN,
+  );
   const params = useParams();
   const workflowId = params.workflowId as string;
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -284,7 +288,7 @@ export const FacebookLeadTriggerDialog = ({
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
     const popup = window.open(
-      "/api/auth/facebook",
+      metaConnector.auth.oauthStartPath,
       "facebook-auth",
       `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`,
     );
@@ -582,7 +586,7 @@ export const FacebookLeadTriggerDialog = ({
                     name="credentialId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Facebook account</FormLabel>
+                        <FormLabel>{metaConnector.credentialLabel}</FormLabel>
                         <Select
                           onValueChange={(val) => {
                             field.onChange(val);

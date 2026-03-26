@@ -2,11 +2,10 @@ import { NonRetriableError } from "inngest";
 import ky, { HTTPError } from "ky";
 import type { StepTools } from "@/features/executions/types";
 import { CredentialType } from "@/generated/prisma";
-import prisma from "@/lib/db";
-import { decrypt } from "@/lib/encryption";
 import {
   getDecryptedCredentialValue,
   loadCredential,
+  loadCredentialForUser,
 } from "../core/credentials";
 
 export const META_GRAPH_API_VERSION = "v22.0";
@@ -66,19 +65,13 @@ export const getMetaAccessTokenForUser = async ({
   credentialId,
   userId,
 }: LoadMetaCredentialForUserOptions) => {
-  const credential = await prisma.credential.findUnique({
-    where: { id: credentialId, userId },
+  const credential = await loadCredentialForUser({
+    credentialId,
+    userId,
+    expectedType: CredentialType.META_ACCESS_TOKEN,
   });
 
-  if (!credential) {
-    throw new Error("Credential not found");
-  }
-
-  if (credential.type !== CredentialType.META_ACCESS_TOKEN) {
-    throw new Error("Credential must be a Meta account");
-  }
-
-  return decrypt(credential.value);
+  return getDecryptedCredentialValue(credential);
 };
 
 export const getMetaPageAccessToken = async ({
