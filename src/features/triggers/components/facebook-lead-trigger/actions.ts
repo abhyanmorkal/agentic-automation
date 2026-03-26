@@ -1,18 +1,28 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { decrypt } from "@/lib/encryption";
-import prisma from "@/lib/db";
-import { type Realtime } from "@inngest/realtime";
+import type { Realtime } from "@inngest/realtime";
+import ky from "ky";
+import { headers } from "next/headers";
 import { facebookLeadTriggerChannel } from "@/inngest/channels/facebook-lead-trigger";
 import { safeGetToken } from "@/inngest/get-token";
-import { headers } from "next/headers";
-import ky, { HTTPError } from "ky";
+import {
+  getMetaAccessTokenForUser,
+  getMetaGraphUrl,
+  getMetaPageAccessToken,
+  parseMetaApiError,
+} from "@/integrations/meta/auth";
+import { auth } from "@/lib/auth";
+import prisma from "@/lib/db";
 
-export type FacebookLeadTriggerToken = Realtime.Token<typeof facebookLeadTriggerChannel, ["status"]>;
+export type FacebookLeadTriggerToken = Realtime.Token<
+  typeof facebookLeadTriggerChannel,
+  ["status"]
+>;
 
 export async function fetchFacebookLeadTriggerRealtimeToken(): Promise<FacebookLeadTriggerToken | null> {
-  return safeGetToken(facebookLeadTriggerChannel(), ["status"]) as Promise<FacebookLeadTriggerToken | null>;
+  return safeGetToken(facebookLeadTriggerChannel(), [
+    "status",
+  ]) as Promise<FacebookLeadTriggerToken | null>;
 }
 
 export type FacebookPage = {
@@ -41,51 +51,47 @@ export type FacebookSampleLead = {
   form_id: string;
 };
 
-async function parseFacebookError(error: unknown): Promise<never> {
-  if (error instanceof HTTPError) {
-    const body = await error.response.json().catch(() => ({})) as { error?: { message?: string; type?: string } };
-    const msg = body?.error?.message;
-    throw new Error(msg ?? `Facebook API error (${error.response.status})`);
-  }
-  throw error;
-}
-
 async function getSession() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) throw new Error("Unauthorized");
   return session;
 }
 
-async function getDecryptedCredential(credentialId: string, userId: string) {
-  const credential = await prisma.credential.findUnique({
-    where: { id: credentialId, userId },
-  });
-  if (!credential) throw new Error("Credential not found");
-  return decrypt(credential.value);
-}
-
-export async function testFacebookConnection(credentialId: string): Promise<{ valid: boolean; name?: string; error?: string }> {
+export async function testFacebookConnection(
+  credentialId: string,
+): Promise<{ valid: boolean; name?: string; error?: string }> {
   try {
     const session = await getSession();
-    const accessToken = await getDecryptedCredential(credentialId, session.user.id);
+    const accessToken = await getMetaAccessTokenForUser({
+      credentialId,
+      userId: session.user.id,
+    });
     const res = await ky
-      .get("https://graph.facebook.com/v22.0/me", {
+      .get(getMetaGraphUrl("me"), {
         searchParams: { access_token: accessToken, fields: "id,name" },
       })
       .json<{ id: string; name?: string }>()
-      .catch(parseFacebookError);
+      .catch(parseMetaApiError);
     return { valid: true, name: res.name };
   } catch (err) {
-    return { valid: false, error: err instanceof Error ? err.message : "Connection failed" };
+    return {
+      valid: false,
+      error: err instanceof Error ? err.message : "Connection failed",
+    };
   }
 }
 
-export async function fetchFacebookPages(credentialId: string): Promise<FacebookPage[]> {
+export async function fetchFacebookPages(
+  credentialId: string,
+): Promise<FacebookPage[]> {
   const session = await getSession();
-  const accessToken = await getDecryptedCredential(credentialId, session.user.id);
+  const accessToken = await getMetaAccessTokenForUser({
+    credentialId,
+    userId: session.user.id,
+  });
 
   const response = await ky
-    .get("https://graph.facebook.com/v22.0/me/accounts", {
+    .get(getMetaGraphUrl("me/accounts"), {
       searchParams: {
         access_token: accessToken,
         fields: "id,name,category,access_token",
@@ -93,7 +99,7 @@ export async function fetchFacebookPages(credentialId: string): Promise<Facebook
       },
     })
     .json<{ data: FacebookPage[] }>()
-    .catch(parseFacebookError);
+    .catch(parseMetaApiError);
 
   return response.data;
 }
@@ -103,23 +109,14 @@ export async function fetchFacebookLeadForms(
   pageId: string,
 ): Promise<FacebookLeadForm[]> {
   const session = await getSession();
-  const userToken = await getDecryptedCredential(credentialId, session.user.id);
-
-  // Exchange user token for page token
-  const pageResponse = await ky
-    .get(`https://graph.facebook.com/v22.0/${pageId}`, {
-      searchParams: {
-        access_token: userToken,
-        fields: "access_token",
-      },
-    })
-    .json<{ access_token: string; id: string }>()
-    .catch(parseFacebookError);
-
-  const pageToken = pageResponse.access_token;
+  const pageToken = await getMetaPageAccessToken({
+    credentialId,
+    userId: session.user.id,
+    pageId,
+  });
 
   const formsResponse = await ky
-    .get(`https://graph.facebook.com/v22.0/${pageId}/leadgen_forms`, {
+    .get(getMetaGraphUrl(`${pageId}/leadgen_forms`), {
       searchParams: {
         access_token: pageToken,
         fields: "id,name,status,leads_count",
@@ -127,7 +124,7 @@ export async function fetchFacebookLeadForms(
       },
     })
     .json<{ data: FacebookLeadForm[] }>()
-    .catch(parseFacebookError);
+    .catch(parseMetaApiError);
 
   return formsResponse.data;
 }
@@ -138,23 +135,14 @@ export async function fetchFacebookSampleLead(
   formId: string,
 ): Promise<FacebookSampleLead | null> {
   const session = await getSession();
-  const userToken = await getDecryptedCredential(credentialId, session.user.id);
-
-  // Get page access token
-  const pageResponse = await ky
-    .get(`https://graph.facebook.com/v22.0/${pageId}`, {
-      searchParams: {
-        access_token: userToken,
-        fields: "access_token",
-      },
-    })
-    .json<{ access_token: string }>()
-    .catch(parseFacebookError);
-
-  const pageToken = pageResponse.access_token;
+  const pageToken = await getMetaPageAccessToken({
+    credentialId,
+    userId: session.user.id,
+    pageId,
+  });
 
   const leadsResponse = await ky
-    .get(`https://graph.facebook.com/v22.0/${formId}/leads`, {
+    .get(getMetaGraphUrl(`${formId}/leads`), {
       searchParams: {
         access_token: pageToken,
         limit: "1",
@@ -162,27 +150,34 @@ export async function fetchFacebookSampleLead(
       },
     })
     .json<{ data: FacebookSampleLead[] }>()
-    .catch(parseFacebookError);
+    .catch(parseMetaApiError);
 
   return leadsResponse.data[0] ?? null;
 }
 
-export async function fetchCredentialExpiry(
-  credentialId: string,
-): Promise<{ expiresAt: string | null; daysRemaining: number | null; warning: boolean }> {
+export async function fetchCredentialExpiry(credentialId: string): Promise<{
+  expiresAt: string | null;
+  daysRemaining: number | null;
+  warning: boolean;
+}> {
   try {
     const session = await getSession();
     const credential = await prisma.credential.findUnique({
       where: { id: credentialId, userId: session.user.id },
     });
-    if (!credential) return { expiresAt: null, daysRemaining: null, warning: false };
+    if (!credential)
+      return { expiresAt: null, daysRemaining: null, warning: false };
 
     const metadata = credential.metadata as { expiresAt?: string } | null;
     const expiresAt = metadata?.expiresAt ?? null;
-    if (!expiresAt) return { expiresAt: null, daysRemaining: null, warning: false };
+    if (!expiresAt)
+      return { expiresAt: null, daysRemaining: null, warning: false };
 
     const msRemaining = new Date(expiresAt).getTime() - Date.now();
-    const daysRemaining = Math.max(0, Math.floor(msRemaining / (1000 * 60 * 60 * 24)));
+    const daysRemaining = Math.max(
+      0,
+      Math.floor(msRemaining / (1000 * 60 * 60 * 24)),
+    );
     const warning = daysRemaining <= 7;
 
     return { expiresAt, daysRemaining, warning };
@@ -195,35 +190,27 @@ export async function fetchCredentialExpiry(
  * Automates the process of subscribing the Facebook App to the selected Page's leadgen webhook.
  * This is REQUIRED for Facebook to send "Object: Page" (leadgen) webhooks to our endpoint.
  */
-export async function setupFacebookLeadWebhook(credentialId: string, pageId: string) {
+export async function setupFacebookLeadWebhook(
+  credentialId: string,
+  pageId: string,
+) {
   try {
     const session = await getSession();
-    const userToken = await getDecryptedCredential(credentialId, session.user.id);
+    const pageToken = await getMetaPageAccessToken({
+      credentialId,
+      userId: session.user.id,
+      pageId,
+    });
 
-    // 1. Get Page Access Token (we need this to perform page-level subscriptions)
-    const pageRes = await ky
-      .get(`https://graph.facebook.com/v22.0/${pageId}`, {
-        searchParams: {
-          access_token: userToken,
-          fields: "access_token",
-        },
-      })
-      .json<{ access_token: string }>()
-      .catch(parseFacebookError);
-
-    const pageToken = pageRes.access_token;
-
-    // 2. Subscribe our App to the Page's leadgen field
-    // This tells Facebook: "Send leadgen notifications for this page to the App's webhook URL"
     await ky
-      .post(`https://graph.facebook.com/v22.0/${pageId}/subscribed_apps`, {
+      .post(getMetaGraphUrl(`${pageId}/subscribed_apps`), {
         searchParams: {
           access_token: pageToken,
           subscribed_fields: "leadgen",
         },
       })
       .json()
-      .catch(parseFacebookError);
+      .catch(parseMetaApiError);
 
     return { success: true };
   } catch (err) {

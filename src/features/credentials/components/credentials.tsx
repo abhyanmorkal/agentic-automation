@@ -1,26 +1,30 @@
 "use client";
 
+import { Anthropic, Gemini, Notion, OpenAI } from "@lobehub/icons";
 import { formatDistanceToNow } from "date-fns";
-import { 
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import type { ComponentType } from "react";
+import {
   EmptyView,
-  EntityContainer, 
-  EntityHeader, 
-  EntityItem, 
-  EntityList, 
-  EntityPagination, 
+  EntityContainer,
+  EntityHeader,
+  EntityItem,
+  EntityList,
+  EntityPagination,
   EntitySearch,
   ErrorView,
-  LoadingView
+  LoadingView,
 } from "@/components/entity-components";
-import { useRemoveCredential, useSuspenseCredentials } from "../hooks/use-credentials"
-import { useRouter } from "next/navigation";
-import { useCredentialsParams } from "../hooks/use-credentials-params";
+import type { Credential, CredentialType } from "@/generated/prisma";
+import { CredentialType as CredentialTypeEnum } from "@/generated/prisma";
 import { useEntitySearch } from "@/hooks/use-entity-search";
-import type { Credential } from "@/generated/prisma";
-import { CredentialType } from "@/generated/prisma";
-import { Anthropic, Gemini, Google, Meta, Notion, OpenAI } from "@lobehub/icons";
-import Image from "next/image";
-import type { ComponentType } from "react";
+import { getConnectorForCredentialType } from "@/integrations/core/registry";
+import {
+  useRemoveCredential,
+  useSuspenseCredentials,
+} from "../hooks/use-credentials";
+import { useCredentialsParams } from "../hooks/use-credentials-params";
 
 export const CredentialsSearch = () => {
   const [params, setParams] = useCredentialsParams();
@@ -78,7 +82,7 @@ export const CredentialsPagination = () => {
 };
 
 export const CredentialsContainer = ({
-  children
+  children,
 }: {
   children: React.ReactNode;
 }) => {
@@ -119,32 +123,30 @@ export const CredentialsEmpty = () => {
 type LobeIconComponent = ComponentType<{ size?: number; className?: string }>;
 type CredentialLogoValue = string | LobeIconComponent;
 
-const credentialLogos: Record<CredentialType, CredentialLogoValue> = {
-  [CredentialType.OPENAI]: OpenAI,
-  [CredentialType.ANTHROPIC]: Anthropic,
-  [CredentialType.GEMINI]: Gemini.Color,
-  [CredentialType.TELEGRAM_BOT_TOKEN]: "/logos/telegram.svg",
-  [CredentialType.NOTION_API_KEY]: Notion,
-  [CredentialType.AIRTABLE_API_KEY]: "/logos/airtable.svg",
-  [CredentialType.RESEND_API_KEY]: "/logos/gmail.svg",
-  [CredentialType.TWILIO]: "/logos/telegram.svg",
-  [CredentialType.GOOGLE_OAUTH]: Google.Color,
-  [CredentialType.META_ACCESS_TOKEN]: Meta.Color,
+const credentialLogos: Partial<Record<CredentialType, CredentialLogoValue>> = {
+  [CredentialTypeEnum.OPENAI]: OpenAI,
+  [CredentialTypeEnum.ANTHROPIC]: Anthropic,
+  [CredentialTypeEnum.GEMINI]: Gemini.Color,
+  [CredentialTypeEnum.TELEGRAM_BOT_TOKEN]: "/logos/telegram.svg",
+  [CredentialTypeEnum.NOTION_API_KEY]: Notion,
+  [CredentialTypeEnum.AIRTABLE_API_KEY]: "/logos/airtable.svg",
+  [CredentialTypeEnum.RESEND_API_KEY]: "/logos/gmail.svg",
+  [CredentialTypeEnum.TWILIO]: "/logos/telegram.svg",
 };
 
-export const CredentialItem = ({
-  data,
-}: { 
-  data: Credential
-}) => {
+export const CredentialItem = ({ data }: { data: Credential }) => {
   const removeCredential = useRemoveCredential();
 
   const handleRemove = () => {
     removeCredential.mutate({ id: data.id });
   };
 
-  const logo = credentialLogos[data.type] ?? "/logos/openai.svg";
-  const LogoIcon = typeof logo !== "string" ? logo : null;
+  const connector = getConnectorForCredentialType(data.type);
+  const logo =
+    connector?.logoPath ?? credentialLogos[data.type] ?? "/logos/openai.svg";
+  const altText = connector?.name ?? data.type;
+  const logoPath = typeof logo === "string" ? logo : null;
+  const LogoIcon = typeof logo === "string" ? null : logo;
 
   return (
     <EntityItem
@@ -162,12 +164,17 @@ export const CredentialItem = ({
           {LogoIcon ? (
             <LogoIcon size={20} />
           ) : (
-            <Image src={logo as string} alt={data.type} width={20} height={20} />
+            <Image
+              src={logoPath ?? "/logos/openai.svg"}
+              alt={altText}
+              width={20}
+              height={20}
+            />
           )}
         </div>
       }
       onRemove={handleRemove}
       isRemoving={removeCredential.isPending}
     />
-  )
+  );
 };

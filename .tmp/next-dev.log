@@ -1,0 +1,29 @@
+
+> nodebase@0.1.0 dev
+> next dev --turbopack
+
+   ▲ Next.js 15.5.4 (Turbopack)
+   - Local:        http://localhost:3000
+   - Network:      http://10.226.237.136:3000
+   - Environments: .env
+   - Experiments (use with caution):
+     · clientTraceMetadata
+
+ ✓ Starting...
+ ○ Compiling instrumentation Node.js ...
+ ✓ Compiled instrumentation Node.js in 2.6s
+ ○ Compiling instrumentation Edge ...
+ ✓ Compiled instrumentation Edge in 684ms
+ ✓ Ready in 7.9s
+ ○ Compiling /workflows ...
+ ✓ Compiled /workflows in 24.8s
+[prisma-init] DATABASE_URL scheme: postgresql
+[2m2026-03-26T14:03:08.563Z[0m [33mWARN[0m [1m[Better Auth]:[0m Social provider github is missing clientId or clientSecret
+ GET /workflows 200 in 30421ms
+ ✓ Compiled in 1361ms
+ ○ Compiling /api/auth/google/callback ...
+ ✓ Compiled /api/auth/google/callback in 6.6s
+ GET /api/auth/google/callback?state=eyJ1c2VySWQiOiI4T284dkVLaXF3QmE2YmxPRHk3bURMYU5Hd3ZuZWthcCIsIm5hbWUiOiJHb29nbGUgU2hlZXRzIEFjY291bnQiLCJtb2RlIjoicG9wdXAiLCJwcm92aWRlciI6Imdvb2dsZSIsIm5vbmNlIjoiZDU3NGU5NGMtNzZhYy00NTg3LWJiOTUtMDU0NWI1Mzk0YjE3IiwiZXhwIjoxNzc0NTM0NTcyNDM3fQ.RshWivsUa8ztSG2ssq6ppDDwN17whmsfXSCUur4Wd0M&iss=https://accounts.google.com&code=4/0Aci98E90y7JmDJY7nH-BzfqjKGeG2iES0CtwN5VCD_-khJguLfhe4x5h3fnk1MJywfaynQ&scope=email%20profile%20https://www.googleapis.com/auth/drive%20https://www.googleapis.com/auth/spreadsheets%20https://www.googleapis.com/auth/gmail.send%20https://www.googleapis.com/auth/userinfo.profile%20https://www.googleapis.com/auth/userinfo.email%20openid&authuser=1&prompt=consent 200 in 12058ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 881ms
+ GET /favicon.ico 200 in 922ms

@@ -1,11 +1,10 @@
 import Handlebars from "handlebars";
 import { decode } from "html-entities";
 import { NonRetriableError } from "inngest";
+import ky from "ky";
 import type { NodeExecutor } from "@/features/executions/types";
 import { facebookPageChannel } from "@/inngest/channels/facebook-page";
-import prisma from "@/lib/db";
-import { decrypt } from "@/lib/encryption";
-import ky from "ky";
+import { getMetaGraphUrl, loadMetaAccessToken } from "@/integrations/meta/auth";
 
 Handlebars.registerHelper("json", (context) => {
   return new Handlebars.SafeString(JSON.stringify(context, null, 2));
@@ -29,7 +28,8 @@ export const facebookPageExecutor: NodeExecutor<FacebookPageData> = async ({
 }) => {
   await publish(facebookPageChannel().status({ nodeId, status: "loading" }));
 
-  if (!data.variableName) {
+  const variableName = data.variableName;
+  if (!variableName) {
     await publish(facebookPageChannel().status({ nodeId, status: "error" }));
     throw new NonRetriableError("Facebook Page node: Variable name is missing");
   }
@@ -46,17 +46,16 @@ export const facebookPageExecutor: NodeExecutor<FacebookPageData> = async ({
     throw new NonRetriableError("Facebook Page node: Message is required");
   }
 
-  const credential = await step.run("get-credential", () =>
-    prisma.credential.findUnique({ where: { id: data.credentialId, userId } }),
-  );
-  if (!credential) {
-    await publish(facebookPageChannel().status({ nodeId, status: "error" }));
-    throw new NonRetriableError("Facebook Page node: Credential not found");
-  }
-
-  const accessToken = decrypt(credential.value);
+  const accessToken = await loadMetaAccessToken({
+    credentialId: data.credentialId,
+    userId,
+    step,
+    nodeName: "Facebook Page node",
+  });
   const message = decode(Handlebars.compile(data.message)(context));
-  const link = data.link ? decode(Handlebars.compile(data.link)(context)) : undefined;
+  const link = data.link
+    ? decode(Handlebars.compile(data.link)(context))
+    : undefined;
 
   try {
     const result = await step.run("facebook-page-post", async () => {
@@ -64,7 +63,7 @@ export const facebookPageExecutor: NodeExecutor<FacebookPageData> = async ({
       if (link) body.link = link;
 
       const response = await ky
-        .post(`https://graph.facebook.com/v19.0/${data.pageId}/feed`, {
+        .post(getMetaGraphUrl(`${data.pageId}/feed`), {
           headers: { Authorization: `Bearer ${accessToken}` },
           json: body,
         })
@@ -72,7 +71,11 @@ export const facebookPageExecutor: NodeExecutor<FacebookPageData> = async ({
 
       return {
         ...context,
-        [data.variableName!]: { postId: response.id, pageId: data.pageId, message },
+        [variableName]: {
+          postId: response.id,
+          pageId: data.pageId,
+          message,
+        },
       };
     });
 

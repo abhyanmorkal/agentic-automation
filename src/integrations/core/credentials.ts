@@ -35,7 +35,7 @@ export const loadCredential = async ({
     );
   }
 
-  return credential;
+  return credential as unknown as Credential;
 };
 
 export const getDecryptedCredentialValue = (credential: Credential) =>
