@@ -68,6 +68,11 @@ export const executionsRouter = createTRPCRouter({
           },
         },
         include: {
+          nodeExecutions: {
+            orderBy: {
+              orderIndex: "asc",
+            },
+          },
           workflow: {
             select: {
               id: true,

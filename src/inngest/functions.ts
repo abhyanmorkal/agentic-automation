@@ -1,6 +1,12 @@
 import { NonRetriableError } from "inngest";
 import { getExecutor } from "@/features/executions/lib/executor-registry";
-import { ExecutionStatus, NodeType } from "@/generated/prisma";
+import {
+  attachNodeResultToContext,
+  createExecutionContext,
+  getNodeExecutionOutput,
+  getPublicContext,
+} from "@/features/executions/lib/runtime-context";
+import { ExecutionStatus, NodeType, Prisma } from "@/generated/prisma";
 import prisma from "@/lib/db";
 import { airtableChannel } from "./channels/airtable";
 import { anthropicChannel } from "./channels/anthropic";
@@ -34,6 +40,30 @@ import {
   stripExecutionMetadata,
 } from "./execution-plan";
 
+const getErrorDetails = (error: unknown) => {
+  if (error instanceof Error) {
+    return {
+      error: error.message,
+      errorStack: error.stack,
+    };
+  }
+
+  return {
+    error: typeof error === "string" ? error : "Unknown node execution error",
+    errorStack: undefined,
+  };
+};
+
+const asJsonValue = (
+  value: unknown,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput => {
+  if (value === null || value === undefined) {
+    return Prisma.JsonNull;
+  }
+
+  return value as Prisma.InputJsonValue;
+};
+
 export const executeWorkflow = inngest.createFunction(
   {
     id: "execute-workflow",
@@ -45,6 +75,7 @@ export const executeWorkflow = inngest.createFunction(
           status: ExecutionStatus.FAILED,
           error: event.data.error.message,
           errorStack: event.data.error.stack,
+          completedAt: new Date(),
         },
       });
     },
@@ -93,12 +124,12 @@ export const executeWorkflow = inngest.createFunction(
       throw new NonRetriableError("Event ID or workflow ID is missing");
     }
 
-    await step.run("create-execution", async () => {
+    const execution = await step.run("create-execution", async () => {
       return prisma.execution.create({
         data: {
           workflowId,
           inngestEventId,
-          initialData: executionInitialData,
+          initialData: asJsonValue(executionInitialData),
         },
       });
     });
@@ -127,19 +158,103 @@ export const executeWorkflow = inngest.createFunction(
     });
 
     // Initialize context with any initial data from the trigger
-    let context = stripExecutionMetadata(executionInitialData);
+    let context = createExecutionContext(
+      stripExecutionMetadata(executionInitialData),
+    );
 
     // Execute each node on the selected trigger path only.
-    for (const node of executionPlan.nodes) {
+    for (const [index, node] of executionPlan.nodes.entries()) {
       const executor = getExecutor(node.type as NodeType);
-      context = await executor({
-        data: node.data as Record<string, unknown>,
-        nodeId: node.id,
-        userId,
-        context,
-        step,
-        publish,
+      const nodeInput = getPublicContext(context);
+
+      await step.run(`node-${index + 1}-${node.id}-start`, async () => {
+        return prisma.executionNode.upsert({
+          where: {
+            executionId_nodeId: {
+              executionId: execution.id,
+              nodeId: node.id,
+            },
+          },
+          update: {
+            nodeName: node.name,
+            nodeType: node.type,
+            orderIndex: index,
+            status: ExecutionStatus.RUNNING,
+            input: asJsonValue(nodeInput),
+            output: Prisma.JsonNull,
+            error: null,
+            errorStack: null,
+            startedAt: new Date(),
+            completedAt: null,
+          },
+          create: {
+            executionId: execution.id,
+            nodeId: node.id,
+            nodeName: node.name,
+            nodeType: node.type,
+            orderIndex: index,
+            status: ExecutionStatus.RUNNING,
+            input: asJsonValue(nodeInput),
+          },
+        });
       });
+
+      try {
+        const nextContext = await executor({
+          data: node.data as Record<string, unknown>,
+          nodeId: node.id,
+          userId,
+          context,
+          step,
+          publish,
+        });
+
+        const runtimeContext = attachNodeResultToContext(
+          context,
+          nextContext,
+          node,
+        );
+        const nodeOutput = getNodeExecutionOutput(runtimeContext, node.id);
+
+        await step.run(`node-${index + 1}-${node.id}-success`, async () => {
+          return prisma.executionNode.update({
+            where: {
+              executionId_nodeId: {
+                executionId: execution.id,
+                nodeId: node.id,
+              },
+            },
+            data: {
+              status: ExecutionStatus.SUCCESS,
+              output: asJsonValue(nodeOutput),
+              completedAt: new Date(),
+            },
+          });
+        });
+
+        context = runtimeContext;
+      } catch (error) {
+        const details = getErrorDetails(error);
+
+        await step.run(`node-${index + 1}-${node.id}-failed`, async () => {
+          return prisma.executionNode.update({
+            where: {
+              executionId_nodeId: {
+                executionId: execution.id,
+                nodeId: node.id,
+              },
+            },
+            data: {
+              status: ExecutionStatus.FAILED,
+              error: details.error,
+              errorStack: details.errorStack,
+              completedAt: new Date(),
+            },
+          });
+        });
+
+        throw error;
+      }
     }
 
     await step.run("update-execution", async () => {
@@ -148,14 +263,14 @@ export const executeWorkflow = inngest.createFunction(
         data: {
           status: ExecutionStatus.SUCCESS,
           completedAt: new Date(),
-          output: context,
+          output: asJsonValue(getPublicContext(context)),
         },
       });
     });
 
     return {
       workflowId,
-      result: context,
+      result: getPublicContext(context),
     };
   },
 );
