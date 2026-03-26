@@ -520,7 +520,6 @@ The `description` field is already in `WebhookTriggerData` and used in the node.
 
 I need to add a collapsible "Send test payload" section. Let me find the right insertion point — after the "Works with" section in the left column:
 
-Read [](file:///d%3A/node%20base/nodebase-main/src/features/triggers/components/webhook-trigger/dialog.tsx)
 
 Add test payload state in the dialog:Add the handler function. Find where `copyToClipboard` is defined and add after it:Now add the test payload UI section in the left column, right before the "Works with" section. I also need to import `ChevronDownIcon` — let me check if it's already imported:
 

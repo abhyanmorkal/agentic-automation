@@ -1,7 +1,12 @@
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getFacebookAuthUrl } from "@/lib/facebook-oauth";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import {
+  createOAuthState,
+  getOAuthStateCookieName,
+  getOAuthStateCookieOptions,
+} from "@/lib/oauth-state";
 
 export async function GET(request: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -12,9 +17,18 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const credentialName = searchParams.get("name") || "My Facebook Account";
 
-  const state = Buffer.from(
-    JSON.stringify({ userId: session.user.id, name: credentialName }),
-  ).toString("base64url");
+  const { state, nonce, expiresAt } = createOAuthState({
+    userId: session.user.id,
+    name: credentialName,
+    mode: "popup",
+    provider: "facebook",
+  });
+  const cookieStore = await cookies();
+  cookieStore.set(
+    getOAuthStateCookieName("facebook"),
+    nonce,
+    getOAuthStateCookieOptions(expiresAt),
+  );
 
   // Build the URL first — this throws a real Error if FACEBOOK_APP_ID is missing.
   // Keep redirect() outside try-catch: Next.js redirect() throws NEXT_REDIRECT
@@ -23,7 +37,10 @@ export async function GET(request: Request) {
   try {
     authUrl = getFacebookAuthUrl(state);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "FACEBOOK_APP_ID is not configured";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "FACEBOOK_APP_ID is not configured";
     return new Response(
       `<!DOCTYPE html><html><body><script>
         window.opener?.postMessage({type:'facebook_auth_error',error:${JSON.stringify(message)}},'*');

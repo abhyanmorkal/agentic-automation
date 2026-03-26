@@ -1,8 +1,10 @@
-import { exchangeCodeForTokens, getGoogleUserEmail } from "@/lib/google-oauth";
-import { encrypt } from "@/lib/encryption";
-import prisma from "@/lib/db";
-import { CredentialType } from "@/generated/prisma";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { CredentialType } from "@/generated/prisma";
+import prisma from "@/lib/db";
+import { encrypt } from "@/lib/encryption";
+import { exchangeCodeForTokens, getGoogleUserEmail } from "@/lib/google-oauth";
+import { getOAuthStateCookieName, verifyOAuthState } from "@/lib/oauth-state";
 
 function htmlResponse(script: string) {
   return new Response(
@@ -19,30 +21,35 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const state = searchParams.get("state");
   const error = searchParams.get("error");
+  const cookieStore = await cookies();
 
   if (!state) {
-    // No state means we don't know the mode; fall back to credentials page.
     if (error) {
       return redirect(`/credentials?error=${encodeURIComponent(error)}`);
     }
+
     return redirect("/credentials?error=missing_state");
   }
 
   let userId: string;
+  let credentialName: string;
   let mode: "popup" | "redirect" = "redirect";
 
   try {
-    const decoded = JSON.parse(Buffer.from(state, "base64url").toString("utf8"));
+    const decoded = verifyOAuthState(state, "google");
+    const nonceCookie = cookieStore.get(
+      getOAuthStateCookieName("google"),
+    )?.value;
+
+    if (!nonceCookie || nonceCookie !== decoded.nonce) {
+      throw new Error("OAuth state nonce mismatch");
+    }
+
+    cookieStore.delete(getOAuthStateCookieName("google"));
     userId = decoded.userId;
-    if (decoded.mode === "popup") {
-      mode = "popup";
-    }
+    credentialName = decoded.name;
+    mode = decoded.mode;
   } catch {
-    if (mode === "popup") {
-      return htmlResponse(
-        `window.opener?.postMessage({type:'google_auth_error',error:'Invalid state parameter'},'*');setTimeout(()=>window.close(),1500);`,
-      );
-    }
     return redirect("/credentials?error=invalid_state");
   }
 
@@ -52,6 +59,7 @@ export async function GET(request: Request) {
         `window.opener?.postMessage({type:'google_auth_error',error:${JSON.stringify(error)}},'*');setTimeout(()=>window.close(),1500);`,
       );
     }
+
     return redirect(`/credentials?error=${encodeURIComponent(error)}`);
   }
 
@@ -61,6 +69,7 @@ export async function GET(request: Request) {
         `window.opener?.postMessage({type:'google_auth_error',error:'Missing code parameter'},'*');setTimeout(()=>window.close(),1500);`,
       );
     }
+
     return redirect("/credentials?error=missing_params");
   }
 
@@ -73,14 +82,13 @@ export async function GET(request: Request) {
           `window.opener?.postMessage({type:'google_auth_error',error:'No refresh token returned from Google'},'*');setTimeout(()=>window.close(),2000);`,
         );
       }
+
       return redirect("/credentials?error=no_refresh_token");
     }
 
     const email = await getGoogleUserEmail(tokens.access_token);
-    const name = `Google — ${email}`;
+    const name = credentialName || `Google - ${email}`;
 
-    // Reuse an existing credential for this user+email instead of creating
-    // duplicates every time they reconnect the same Google account.
     let credential = await prisma.credential.findFirst({
       where: {
         userId,
@@ -94,15 +102,14 @@ export async function GET(request: Request) {
         data: {
           name,
           type: CredentialType.GOOGLE_OAUTH,
-          value: encrypt(tokens.refresh_token!),
+          value: encrypt(tokens.refresh_token),
           userId,
         },
       });
     } else {
-      // Update the stored refresh token in case Google rotated it.
       credential = await prisma.credential.update({
         where: { id: credential.id },
-        data: { value: encrypt(tokens.refresh_token!) },
+        data: { value: encrypt(tokens.refresh_token) },
       });
     }
 
@@ -118,7 +125,9 @@ export async function GET(request: Request) {
 
     return redirect("/credentials?success=google_connected");
   } catch (err) {
-    const message = err instanceof Error ? err.message : "token_exchange_failed";
+    const message =
+      err instanceof Error ? err.message : "token_exchange_failed";
+
     if (mode === "popup") {
       return htmlResponse(
         `window.opener?.postMessage({type:'google_auth_error',error:${JSON.stringify(
@@ -126,6 +135,7 @@ export async function GET(request: Request) {
         )}},'*');setTimeout(()=>window.close(),2000);`,
       );
     }
+
     return redirect(`/credentials?error=${encodeURIComponent(message)}`);
   }
 }

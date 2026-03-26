@@ -1,7 +1,13 @@
-import { exchangeCodeForToken, exchangeForLongLivedToken, getFacebookUserInfo } from "@/lib/facebook-oauth";
-import { encrypt } from "@/lib/encryption";
-import prisma from "@/lib/db";
+import { cookies } from "next/headers";
 import { CredentialType } from "@/generated/prisma";
+import prisma from "@/lib/db";
+import { encrypt } from "@/lib/encryption";
+import {
+  exchangeCodeForToken,
+  exchangeForLongLivedToken,
+  getFacebookUserInfo,
+} from "@/lib/facebook-oauth";
+import { getOAuthStateCookieName, verifyOAuthState } from "@/lib/oauth-state";
 
 function htmlResponse(script: string) {
   return new Response(
@@ -35,6 +41,7 @@ export async function GET(request: Request) {
   const state = searchParams.get("state");
   const error = searchParams.get("error");
   const errorDescription = searchParams.get("error_description");
+  const cookieStore = await cookies();
 
   if (error) {
     return htmlResponse(
@@ -52,7 +59,16 @@ export async function GET(request: Request) {
   let credentialName: string;
 
   try {
-    const decoded = JSON.parse(Buffer.from(state, "base64url").toString("utf8"));
+    const decoded = verifyOAuthState(state, "facebook");
+    const nonceCookie = cookieStore.get(
+      getOAuthStateCookieName("facebook"),
+    )?.value;
+
+    if (!nonceCookie || nonceCookie !== decoded.nonce) {
+      throw new Error("OAuth state nonce mismatch");
+    }
+
+    cookieStore.delete(getOAuthStateCookieName("facebook"));
     userId = decoded.userId;
     credentialName = decoded.name || "My Facebook Account";
   } catch {
@@ -62,79 +78,74 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Exchange code → short-lived token → long-lived token (~60 days)
     const shortToken = await exchangeCodeForToken(code);
-    const { access_token: longToken, expires_in: expiresIn } = await exchangeForLongLivedToken(shortToken);
+    const { access_token: longToken, expires_in: expiresIn } =
+      await exchangeForLongLivedToken(shortToken);
 
-    // Compute absolute expiry timestamp
     const expiresAt = expiresIn
       ? new Date(Date.now() + expiresIn * 1000).toISOString()
       : null;
 
-    // Get Facebook user's ID and name for labelling + deduplication
     const fbUser = await getFacebookUserInfo(longToken).catch(() => null);
     const fbName = fbUser?.name ?? null;
     const facebookUserId = fbUser?.id ?? null;
-    const name = fbName ? `Facebook — ${fbName}` : credentialName;
+    const name = fbName ? `Facebook - ${fbName}` : credentialName;
 
-    // Build metadata — always include facebookUserId so we can deduplicate
     const metadata: Record<string, string> = {};
     if (expiresAt) metadata.expiresAt = expiresAt;
     if (facebookUserId) metadata.facebookUserId = facebookUserId;
 
-    // Use upsert so that reconnecting the same Facebook account
-    // refreshes the token instead of creating a duplicate credential.
-    // The unique key is the combination of userId + facebookUserId.
-    // Fall back to create if we couldn't fetch the Facebook user ID.
-    let credential;
-    if (facebookUserId) {
-      // Try to find an existing credential for this Facebook account
-      const existing = await prisma.credential.findFirst({
-        where: {
-          userId,
-          type: CredentialType.META_ACCESS_TOKEN,
-          metadata: { path: ["facebookUserId"], equals: facebookUserId },
-        },
-      });
+    const credential = facebookUserId
+      ? await (async () => {
+          const existing = await prisma.credential.findFirst({
+            where: {
+              userId,
+              type: CredentialType.META_ACCESS_TOKEN,
+              metadata: { path: ["facebookUserId"], equals: facebookUserId },
+            },
+          });
 
-      if (existing) {
-        credential = await prisma.credential.update({
-          where: { id: existing.id },
-          data: {
-            name,
-            value: encrypt(longToken),
-            metadata,
-          },
-        });
-      } else {
-        credential = await prisma.credential.create({
+          if (existing) {
+            return prisma.credential.update({
+              where: { id: existing.id },
+              data: {
+                name,
+                value: encrypt(longToken),
+                metadata,
+              },
+            });
+          }
+
+          return prisma.credential.create({
+            data: {
+              name,
+              type: CredentialType.META_ACCESS_TOKEN,
+              value: encrypt(longToken),
+              metadata,
+              userId,
+            },
+          });
+        })()
+      : await prisma.credential.create({
           data: {
             name,
             type: CredentialType.META_ACCESS_TOKEN,
             value: encrypt(longToken),
-            metadata,
+            metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
             userId,
           },
         });
-      }
-    } else {
-      // No Facebook user ID — safe fallback, always create
-      credential = await prisma.credential.create({
-        data: {
-          name,
-          type: CredentialType.META_ACCESS_TOKEN,
-          value: encrypt(longToken),
-          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-          userId,
-        },
-      });
-    }
 
     return htmlResponse(
-      `window.opener?.postMessage({type:'facebook_auth_success',credentialId:${JSON.stringify(credential.id)},credentialName:${JSON.stringify(credential.name)}},'*');setTimeout(()=>window.close(),800);`,
+      `window.opener?.postMessage({type:'facebook_auth_success',credentialId:${JSON.stringify(
+        credential.id,
+      )},credentialName:${JSON.stringify(
+        credential.name,
+      )}},'*');setTimeout(()=>window.close(),800);`,
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Token exchange failed";
+    const message =
+      err instanceof Error ? err.message : "Token exchange failed";
     return htmlResponse(
       `window.opener?.postMessage({type:'facebook_auth_error',error:${JSON.stringify(message)}},'*');setTimeout(()=>window.close(),2000);`,
     );

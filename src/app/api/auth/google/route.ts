@@ -1,7 +1,12 @@
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getGoogleAuthUrl } from "@/lib/google-oauth";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import {
+  createOAuthState,
+  getOAuthStateCookieName,
+  getOAuthStateCookieOptions,
+} from "@/lib/oauth-state";
 
 export async function GET(request: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -13,11 +18,18 @@ export async function GET(request: Request) {
   const credentialName = searchParams.get("name") || "My Google Account";
   const mode = searchParams.get("mode") === "popup" ? "popup" : "redirect";
 
-  // State encodes userId + credential name (+ optional mode) in base64 so it
-  // survives URL encoding.
-  const state = Buffer.from(
-    JSON.stringify({ userId: session.user.id, name: credentialName, mode }),
-  ).toString("base64url");
+  const { state, nonce, expiresAt } = createOAuthState({
+    userId: session.user.id,
+    name: credentialName,
+    mode,
+    provider: "google",
+  });
+  const cookieStore = await cookies();
+  cookieStore.set(
+    getOAuthStateCookieName("google"),
+    nonce,
+    getOAuthStateCookieOptions(expiresAt),
+  );
 
   redirect(getGoogleAuthUrl(state));
 }
