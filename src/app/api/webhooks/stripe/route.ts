@@ -1,5 +1,6 @@
-import { sendWorkflowExecution } from "@/inngest/utils";
 import { type NextRequest, NextResponse } from "next/server";
+import { NodeType } from "@/generated/prisma";
+import { sendWorkflowExecution } from "@/inngest/utils";
 
 export async function POST(request: NextRequest) {
   try {
@@ -8,10 +9,13 @@ export async function POST(request: NextRequest) {
 
     if (!workflowId) {
       return NextResponse.json(
-        { success: false, error: "Missing required query parameter: workflowId" },
+        {
+          success: false,
+          error: "Missing required query parameter: workflowId",
+        },
         { status: 400 },
       );
-    };
+    }
 
     const body = await request.json();
 
@@ -27,20 +31,18 @@ export async function POST(request: NextRequest) {
     // Trigger an Inngest job
     await sendWorkflowExecution({
       workflowId,
+      triggerType: NodeType.STRIPE_TRIGGER,
       initialData: {
         stripe: stripeData,
       },
     });
 
-    return NextResponse.json(
-      { success: true },
-      { status: 200 },
-    );
+    return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
-    console.error("Stripe webhook error:" , error);
+    console.error("Stripe webhook error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to process Stripe event" },
       { status: 500 },
     );
   }
-};
+}

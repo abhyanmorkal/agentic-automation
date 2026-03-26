@@ -1,9 +1,11 @@
-import prisma from "@/lib/db";
-import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { TRPCError } from "@trpc/server";
 import z from "zod";
 import { PAGINATION } from "@/config/constants";
+import type { NodeType } from "@/generated/prisma";
+import { EXECUTION_METADATA_KEY } from "@/inngest/execution-plan";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { TRPCError } from "@trpc/server";
+import prisma from "@/lib/db";
+import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 export const executionsRouter = createTRPCRouter({
   retry: protectedProcedure
@@ -15,14 +17,43 @@ export const executionsRouter = createTRPCRouter({
       });
 
       try {
+        const runtimeMetadata =
+          execution.initialData &&
+          typeof execution.initialData === "object" &&
+          !Array.isArray(execution.initialData)
+            ? (execution.initialData as Record<string, unknown>)[
+                EXECUTION_METADATA_KEY
+              ]
+            : undefined;
+        const triggerNodeId =
+          runtimeMetadata &&
+          typeof runtimeMetadata === "object" &&
+          runtimeMetadata !== null &&
+          "triggerNodeId" in runtimeMetadata &&
+          typeof runtimeMetadata.triggerNodeId === "string"
+            ? runtimeMetadata.triggerNodeId
+            : undefined;
+        const triggerType =
+          runtimeMetadata &&
+          typeof runtimeMetadata === "object" &&
+          runtimeMetadata !== null &&
+          "triggerType" in runtimeMetadata &&
+          typeof runtimeMetadata.triggerType === "string"
+            ? (runtimeMetadata.triggerType as NodeType)
+            : undefined;
+
         await sendWorkflowExecution({
           workflowId: execution.workflowId,
-          initialData: (execution.initialData as Record<string, unknown>) ?? undefined,
+          triggerNodeId,
+          triggerType,
+          initialData:
+            (execution.initialData as Record<string, unknown>) ?? undefined,
         });
       } catch (err) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: err instanceof Error ? err.message : "Failed to retry execution",
+          message:
+            err instanceof Error ? err.message : "Failed to retry execution",
         });
       }
     }),
@@ -30,11 +61,11 @@ export const executionsRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => {
       return prisma.execution.findUniqueOrThrow({
-        where: { 
-          id: input.id, 
-          workflow: { 
-            userId: ctx.auth.user.id
-          }
+        where: {
+          id: input.id,
+          workflow: {
+            userId: ctx.auth.user.id,
+          },
         },
         include: {
           workflow: {
@@ -43,7 +74,7 @@ export const executionsRouter = createTRPCRouter({
               name: true,
             },
           },
-        }
+        },
       });
     }),
   getMany: protectedProcedure
@@ -55,7 +86,7 @@ export const executionsRouter = createTRPCRouter({
           .min(PAGINATION.MIN_PAGE_SIZE)
           .max(PAGINATION.MAX_PAGE_SIZE)
           .default(PAGINATION.DEFAULT_PAGE_SIZE),
-      })
+      }),
     )
     .query(async ({ ctx, input }) => {
       const { page, pageSize } = input;
@@ -64,7 +95,7 @@ export const executionsRouter = createTRPCRouter({
         prisma.execution.findMany({
           skip: (page - 1) * pageSize,
           take: pageSize,
-          where: { 
+          where: {
             workflow: {
               userId: ctx.auth.user.id,
             },

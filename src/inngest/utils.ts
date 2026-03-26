@@ -1,8 +1,9 @@
-import { Connection, Node } from "@/generated/prisma";
-import toposort from "toposort";
-import { inngest } from "./client";
 import { createId } from "@paralleldrive/cuid2";
+import toposort from "toposort";
+import type { Connection, Node, NodeType } from "@/generated/prisma";
 import prisma from "@/lib/db";
+import { inngest } from "./client";
+import { attachExecutionMetadata } from "./execution-plan";
 
 export const topologicalSort = (
   nodes: Node[],
@@ -47,7 +48,9 @@ export const topologicalSort = (
 
   // Map sorted IDs back to node objects
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  return sortedNodeIds.map((id) => nodeMap.get(id)!).filter(Boolean);
+  return sortedNodeIds
+    .map((id) => nodeMap.get(id))
+    .filter((node): node is Node => Boolean(node));
 };
 
 /**
@@ -58,7 +61,13 @@ export const topologicalSort = (
  *   manual executions so the user can always test regardless of active state.
  */
 export const sendWorkflowExecution = async (
-  data: { workflowId: string; [key: string]: any },
+  data: {
+    workflowId: string;
+    triggerNodeId?: string;
+    triggerType?: NodeType;
+    initialData?: Record<string, unknown>;
+    [key: string]: unknown;
+  },
   options: { checkActive?: boolean } = { checkActive: true },
 ) => {
   if (options.checkActive !== false) {
@@ -73,17 +82,25 @@ export const sendWorkflowExecution = async (
   }
 
   try {
+    const payload = {
+      ...data,
+      initialData: attachExecutionMetadata(data.initialData, {
+        triggerNodeId: data.triggerNodeId,
+        triggerType: data.triggerType,
+      }),
+    };
+
     return await inngest.send({
       name: "workflows/execute.workflow",
-      data,
+      data: payload,
       id: createId(),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(
       `Workflow execution failed: Inngest is not reachable. ` +
-      `Run "npm run inngest:dev" in a separate terminal to start the local Inngest server. ` +
-      `Original error: ${msg}`
+        `Run "npm run inngest:dev" in a separate terminal to start the local Inngest server. ` +
+        `Original error: ${msg}`,
     );
   }
 };

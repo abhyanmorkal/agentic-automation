@@ -1,11 +1,12 @@
+import ky from "ky";
 import { type NextRequest, NextResponse } from "next/server";
+import { NodeType } from "@/generated/prisma";
+import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
 import { decrypt } from "@/lib/encryption";
-import { sendWorkflowExecution } from "@/inngest/utils";
-import ky from "ky";
-import { NodeType } from "@/generated/prisma";
 
-const VERIFY_TOKEN = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN || "fb-lead-verify-token";
+const VERIFY_TOKEN =
+  process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN || "fb-lead-verify-token";
 const FB_API = "https://graph.facebook.com/v22.0";
 
 /**
@@ -66,10 +67,13 @@ export async function POST(request: NextRequest) {
     const workflowId = searchParams.get("workflowId");
 
     if (!workflowId) {
-      return NextResponse.json({ error: "Missing workflowId" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing workflowId" },
+        { status: 400 },
+      );
     }
 
-    const body = await request.json() as FacebookLeadgenWebhook;
+    const body = (await request.json()) as FacebookLeadgenWebhook;
 
     if (body.object !== "page") {
       return NextResponse.json({ success: true }, { status: 200 });
@@ -90,13 +94,17 @@ export async function POST(request: NextRequest) {
         });
 
         if (!triggerNode) {
-          console.warn(`No FACEBOOK_LEAD_TRIGGER node in workflow ${workflowId}`);
+          console.warn(
+            `No FACEBOOK_LEAD_TRIGGER node in workflow ${workflowId}`,
+          );
           continue;
         }
 
         const nodeData = triggerNode.data as { credentialId?: string };
         if (!nodeData.credentialId) {
-          console.warn(`FACEBOOK_LEAD_TRIGGER node has no credentialId in workflow ${workflowId}`);
+          console.warn(
+            `FACEBOOK_LEAD_TRIGGER node has no credentialId in workflow ${workflowId}`,
+          );
           continue;
         }
 
@@ -122,7 +130,7 @@ export async function POST(request: NextRequest) {
         if (!pageData?.access_token) {
           console.error(
             `[facebook-leads] Failed to fetch page access token for pageId=${pageId} in workflow=${workflowId}. ` +
-            `Ensure the credential has pages_read_engagement and pages_manage_ads permissions.`,
+              `Ensure the credential has pages_read_engagement and pages_manage_ads permissions.`,
           );
           continue;
         }
@@ -141,7 +149,9 @@ export async function POST(request: NextRequest) {
           .catch(() => null);
 
         if (!lead) {
-          console.error(`Failed to fetch lead data for leadgen_id ${leadgenId}`);
+          console.error(
+            `Failed to fetch lead data for leadgen_id ${leadgenId}`,
+          );
           continue;
         }
 
@@ -159,6 +169,8 @@ export async function POST(request: NextRequest) {
         // Trigger the workflow
         await sendWorkflowExecution({
           workflowId,
+          triggerNodeId: triggerNode.id,
+          triggerType: NodeType.FACEBOOK_LEAD_TRIGGER,
           initialData: {
             facebookLead: {
               leadId: lead.id,
@@ -177,6 +189,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     console.error("Facebook leads webhook error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

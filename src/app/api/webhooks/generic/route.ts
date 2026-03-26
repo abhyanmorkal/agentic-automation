@@ -1,5 +1,6 @@
-import { sendWorkflowExecution } from "@/inngest/utils";
 import { type NextRequest, NextResponse } from "next/server";
+import { NodeType } from "@/generated/prisma";
+import { sendWorkflowExecution } from "@/inngest/utils";
 
 export async function POST(request: NextRequest) {
   try {
@@ -8,7 +9,10 @@ export async function POST(request: NextRequest) {
 
     if (!workflowId) {
       return NextResponse.json(
-        { success: false, error: "Missing required query parameter: workflowId" },
+        {
+          success: false,
+          error: "Missing required query parameter: workflowId",
+        },
         { status: 400 },
       );
     }
@@ -47,6 +51,7 @@ export async function POST(request: NextRequest) {
 
     await sendWorkflowExecution({
       workflowId,
+      triggerType: NodeType.WEBHOOK_TRIGGER,
       initialData: {
         webhook: webhookData,
       },
@@ -69,5 +74,8 @@ export async function GET(request: NextRequest) {
   if (challenge) {
     return new Response(challenge, { status: 200 });
   }
-  return NextResponse.json({ status: "Webhook endpoint active" }, { status: 200 });
+  return NextResponse.json(
+    { status: "Webhook endpoint active" },
+    { status: 200 },
+  );
 }

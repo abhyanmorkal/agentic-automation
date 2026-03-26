@@ -1,8 +1,8 @@
+import crypto from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
-import prisma from "@/lib/db";
-import { sendWorkflowExecution } from "@/inngest/utils";
 import { NodeType } from "@/generated/prisma";
+import { sendWorkflowExecution } from "@/inngest/utils";
+import prisma from "@/lib/db";
 
 type TokenPayload = {
   workflowId: string;
@@ -11,7 +11,9 @@ type TokenPayload = {
 
 function decodeToken(rawToken: string): TokenPayload | null {
   try {
-    const normalized = rawToken.endsWith("_pc") ? rawToken.slice(0, -3) : rawToken;
+    const normalized = rawToken.endsWith("_pc")
+      ? rawToken.slice(0, -3)
+      : rawToken;
     const decoded = Buffer.from(normalized, "base64").toString("utf8");
     const json = decodeURIComponent(decoded);
     const parsed = JSON.parse(json) as TokenPayload;
@@ -22,7 +24,11 @@ function decodeToken(rawToken: string): TokenPayload | null {
   }
 }
 
-async function parseRequestBody(rawBody: Buffer, contentType: string, request: NextRequest) {
+async function parseRequestBody(
+  rawBody: Buffer,
+  contentType: string,
+  request: NextRequest,
+) {
   if (contentType.includes("application/json")) {
     try {
       return {
@@ -124,16 +130,20 @@ export async function POST(
 
     // HMAC signature verification (if a secret is configured)
     const nodeData = (node.data ?? {}) as Record<string, unknown>;
-    const webhookSecret = typeof nodeData.webhookSecret === "string" && nodeData.webhookSecret
-      ? nodeData.webhookSecret
-      : null;
+    const webhookSecret =
+      typeof nodeData.webhookSecret === "string" && nodeData.webhookSecret
+        ? nodeData.webhookSecret
+        : null;
 
     if (webhookSecret) {
       const signature =
         request.headers.get("x-webhook-signature") ??
         request.headers.get("x-hub-signature-256") ??
         "";
-      const hmac = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+      const hmac = crypto
+        .createHmac("sha256", webhookSecret)
+        .update(rawBody)
+        .digest("hex");
       const expected = `sha256=${hmac}`;
       const sigBuf = Buffer.from(signature);
       const expBuf = Buffer.from(expected);
@@ -186,19 +196,24 @@ export async function POST(
     await prisma.node.update({
       where: { id: node.id },
       data: {
-        data: updatedData as any,
+        data: updatedData,
       },
     });
 
     await sendWorkflowExecution({
       workflowId,
+      triggerNodeId: node.id,
+      triggerType: NodeType.WEBHOOK_TRIGGER,
       initialData: {
         webhook: {
           ...webhookData,
           // Expose any saved design-time samples to downstream nodes for mapping.
           // This keeps existing `webhook.body.*` references working while allowing
           // optional access to `webhook.savedResponses.*` when needed.
-          savedResponses: (nodeData.savedResponses ?? {}) as Record<string, unknown>,
+          savedResponses: (nodeData.savedResponses ?? {}) as Record<
+            string,
+            unknown
+          >,
         },
       },
     });
@@ -230,4 +245,3 @@ export async function GET(
     { status: 200 },
   );
 }
-
