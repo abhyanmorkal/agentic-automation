@@ -1,11 +1,13 @@
 import Handlebars from "handlebars";
 import { decode } from "html-entities";
 import { NonRetriableError } from "inngest";
+import ky from "ky";
 import type { NodeExecutor } from "@/features/executions/types";
 import { googleSheetsChannel } from "@/inngest/channels/google-sheets";
-import prisma from "@/lib/db";
-import { decrypt } from "@/lib/encryption";
-import ky from "ky";
+import {
+  getGoogleAccessToken,
+  loadGoogleRefreshToken,
+} from "@/integrations/google/auth";
 
 Handlebars.registerHelper("json", (context) => {
   return new Handlebars.SafeString(JSON.stringify(context, null, 2));
@@ -20,15 +22,23 @@ function resolvePath(obj: unknown, path: string): string {
   // e.g. "webhook.savedResponses['Response A'].data.email"
   // becomes ["webhook", "savedResponses", "Response A", "data", "email"]
   const segments: string[] = [];
-  const re = /\[['"]?(.+?)['"]?\]|([^.\[\]]+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(path)) !== null) {
-    segments.push(match[1] ?? match[2]!);
+  const re = /\[['"]?(.+?)['"]?\]|([^.[]]+)/g;
+  let match = re.exec(path);
+  while (match !== null) {
+    const segment = match[1] ?? match[2];
+    if (segment) {
+      segments.push(segment);
+    }
+    match = re.exec(path);
   }
 
   let current: unknown = obj;
   for (const seg of segments) {
-    if (current === null || current === undefined || typeof current !== "object") {
+    if (
+      current === null ||
+      current === undefined ||
+      typeof current !== "object"
+    ) {
       return "";
     }
     current = (current as Record<string, unknown>)[seg];
@@ -44,29 +54,35 @@ function resolvePath(obj: unknown, path: string): string {
  * bracket notation (which Handlebars can't parse) directly from the context.
  * Standard dot-notation expressions are left for Handlebars to handle.
  */
-function resolveTemplateValues(template: string, context: Record<string, unknown>): string {
-  // Backward compatibility: automatically upgrade old templates that refer to 
+function resolveTemplateValues(
+  template: string,
+  context: Record<string, unknown>,
+): string {
+  // Backward compatibility: automatically upgrade old templates that refer to
   // design-time saved responses to instead use the live execution data paths.
   let upgradedTemplate = template;
-  
+
   // Upgrades: {{webhook.savedResponses['Response A'].data.email}} -> {{webhook.body.email}}
   upgradedTemplate = upgradedTemplate.replace(
     /\{\{\s*webhook\.savedResponses\[.*?\]\.data\.(.*?)\s*\}\}/g,
-    "{{webhook.body.$1}}"
+    "{{webhook.body.$1}}",
   );
 
   // Upgrades: {{facebookLead.savedResponses['X'].data.email}} -> {{facebookLead.fields.email}}
-  // Note: While facebookLead used sampleResponseSimple/Advanced, we mapped it to savedResponse 
+  // Note: While facebookLead used sampleResponseSimple/Advanced, we mapped it to savedResponse
   // virtually in the frontend, so it might have been saved in this format if a user updated during development.
   upgradedTemplate = upgradedTemplate.replace(
     /\{\{\s*facebookLead\.savedResponses\[.*?\]\.data\.(.*?)\s*\}\}/g,
-    "{{facebookLead.fields.$1}}"
+    "{{facebookLead.fields.$1}}",
   );
 
   // First pass: resolve any remaining bracket-notation expressions manually
-  const resolved = upgradedTemplate.replace(/\{\{([^}]*\[.*?\][^}]*)\}\}/g, (_match, path: string) => {
-    return resolvePath(context, path.trim());
-  });
+  const resolved = upgradedTemplate.replace(
+    /\{\{([^}]*\[.*?\][^}]*)\}\}/g,
+    (_match, path: string) => {
+      return resolvePath(context, path.trim());
+    },
+  );
 
   // Second pass: let Handlebars handle any remaining standard expressions
   try {
@@ -90,20 +106,6 @@ type GoogleSheetsData = {
   readFilter?: { column: string; operator: string; value: string };
   readOutputMapping?: Record<string, string>;
 };
-
-async function getAccessToken(refreshToken: string): Promise<string> {
-  const res = await ky
-    .post("https://oauth2.googleapis.com/token", {
-      json: {
-        client_id: process.env.GOOGLE_CLIENT_ID,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET,
-        refresh_token: refreshToken,
-        grant_type: "refresh_token",
-      },
-    })
-    .json<{ access_token: string }>();
-  return res.access_token;
-}
 
 function matchesFilter(
   cellValue: string,
@@ -146,22 +148,24 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
   }
   if (!data.spreadsheetId) {
     await publish(googleSheetsChannel().status({ nodeId, status: "error" }));
-    throw new NonRetriableError("Google Sheets node: Spreadsheet ID is required");
+    throw new NonRetriableError(
+      "Google Sheets node: Spreadsheet ID is required",
+    );
   }
   if (!data.range) {
     await publish(googleSheetsChannel().status({ nodeId, status: "error" }));
-    throw new NonRetriableError("Google Sheets node: Range is required (e.g. Sheet1!A:Z)");
+    throw new NonRetriableError(
+      "Google Sheets node: Range is required (e.g. Sheet1!A:Z)",
+    );
   }
 
-  const credential = await step.run("get-credential", () =>
-    prisma.credential.findUnique({ where: { id: data.credentialId, userId } }),
-  );
-  if (!credential) {
-    await publish(googleSheetsChannel().status({ nodeId, status: "error" }));
-    throw new NonRetriableError("Google Sheets node: Credential not found");
-  }
-
-  const refreshToken = decrypt(credential.value);
+  const refreshToken = await loadGoogleRefreshToken({
+    credentialId: data.credentialId,
+    userId,
+    step,
+    nodeName: "Google Sheets node",
+  });
+  const variableName = data.variableName;
   const action = data.action ?? "append";
   const spreadsheetId = data.spreadsheetId;
   let range = decode(Handlebars.compile(data.range)(context));
@@ -173,7 +177,7 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
 
   try {
     const result = await step.run("google-sheets-action", async () => {
-      const accessToken = await getAccessToken(refreshToken);
+      const accessToken = await getGoogleAccessToken(refreshToken);
 
       if (action === "read") {
         const response = await ky
@@ -183,7 +187,7 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
           )
           .json<{ values: string[][] }>();
 
-        let rows = response.values ?? [];
+        const rows = response.values ?? [];
         const headers = rows[0] ?? [];
         let dataRows = rows.slice(1);
 
@@ -192,7 +196,10 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
         if (filter?.column && filter.value) {
           const colIndex = headers.indexOf(filter.column);
           if (colIndex >= 0) {
-            const filterValue = resolveTemplateValues(filter.value, context as Record<string, unknown>);
+            const filterValue = resolveTemplateValues(
+              filter.value,
+              context as Record<string, unknown>,
+            );
             dataRows = dataRows.filter((row) =>
               matchesFilter(row[colIndex] ?? "", filter.operator, filterValue),
             );
@@ -201,7 +208,8 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
 
         // Apply output mapping if configured
         const outputMapping = data.readOutputMapping;
-        const hasMapping = outputMapping && Object.values(outputMapping).some((v) => v);
+        const hasMapping =
+          outputMapping && Object.values(outputMapping).some((v) => v);
 
         if (hasMapping) {
           const mappedRows = dataRows.map((row) => {
@@ -216,7 +224,7 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
 
           return {
             ...context,
-            [data.variableName!]: {
+            [variableName]: {
               rows: mappedRows,
               row: mappedRows[0] ?? {},
               totalRows: mappedRows.length,
@@ -228,7 +236,7 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
 
         return {
           ...context,
-          [data.variableName!]: {
+          [variableName]: {
             values: dataRows,
             row: dataRows[0] ?? [],
             totalRows: dataRows.length,
@@ -241,11 +249,16 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
       // Append
       let parsedValues: string[][] = [[]];
       if (data.values) {
-        const resolvedValues = resolveTemplateValues(data.values, context as Record<string, unknown>);
+        const resolvedValues = resolveTemplateValues(
+          data.values,
+          context as Record<string, unknown>,
+        );
         try {
           parsedValues = JSON.parse(resolvedValues);
         } catch {
-          throw new NonRetriableError("Google Sheets node: Values must be a valid JSON 2D array");
+          throw new NonRetriableError(
+            "Google Sheets node: Values must be a valid JSON 2D array",
+          );
         }
       }
 
@@ -261,7 +274,7 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
 
       return {
         ...context,
-        [data.variableName!]: {
+        [variableName]: {
           updatedRange: response.updates.updatedRange,
           updatedRows: response.updates.updatedRows,
         },

@@ -1,11 +1,13 @@
 import Handlebars from "handlebars";
 import { decode } from "html-entities";
 import { NonRetriableError } from "inngest";
+import ky from "ky";
 import type { NodeExecutor } from "@/features/executions/types";
 import { gmailChannel } from "@/inngest/channels/gmail";
-import prisma from "@/lib/db";
-import { decrypt } from "@/lib/encryption";
-import ky from "ky";
+import {
+  getGoogleAccessToken,
+  loadGoogleRefreshToken,
+} from "@/integrations/google/auth";
 
 Handlebars.registerHelper("json", (context) => {
   return new Handlebars.SafeString(JSON.stringify(context, null, 2));
@@ -18,20 +20,6 @@ type GmailData = {
   subject?: string;
   body?: string;
 };
-
-async function getAccessToken(refreshToken: string): Promise<string> {
-  const res = await ky
-    .post("https://oauth2.googleapis.com/token", {
-      json: {
-        client_id: process.env.GOOGLE_CLIENT_ID,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET,
-        refresh_token: refreshToken,
-        grant_type: "refresh_token",
-      },
-    })
-    .json<{ access_token: string }>();
-  return res.access_token;
-}
 
 export const gmailExecutor: NodeExecutor<GmailData> = async ({
   data,
@@ -60,22 +48,22 @@ export const gmailExecutor: NodeExecutor<GmailData> = async ({
     throw new NonRetriableError("Gmail node: Subject is required");
   }
 
-  const credential = await step.run("get-credential", () =>
-    prisma.credential.findUnique({ where: { id: data.credentialId, userId } }),
-  );
-  if (!credential) {
-    await publish(gmailChannel().status({ nodeId, status: "error" }));
-    throw new NonRetriableError("Gmail node: Credential not found");
-  }
-
-  const refreshToken = decrypt(credential.value);
+  const refreshToken = await loadGoogleRefreshToken({
+    credentialId: data.credentialId,
+    userId,
+    step,
+    nodeName: "Gmail node",
+  });
+  const variableName = data.variableName;
   const to = decode(Handlebars.compile(data.to)(context));
   const subject = decode(Handlebars.compile(data.subject)(context));
-  const bodyText = data.body ? decode(Handlebars.compile(data.body)(context)) : "";
+  const bodyText = data.body
+    ? decode(Handlebars.compile(data.body)(context))
+    : "";
 
   try {
     const result = await step.run("gmail-send", async () => {
-      const accessToken = await getAccessToken(refreshToken);
+      const accessToken = await getGoogleAccessToken(refreshToken);
 
       const emailLines = [
         `To: ${to}`,
@@ -92,18 +80,20 @@ export const gmailExecutor: NodeExecutor<GmailData> = async ({
         .replace(/=+$/, "");
 
       const response = await ky
-        .post(
-          "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            json: { raw },
-          },
-        )
+        .post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          json: { raw },
+        })
         .json<{ id: string; threadId: string }>();
 
       return {
         ...context,
-        [data.variableName!]: { messageId: response.id, threadId: response.threadId, to, subject },
+        [variableName]: {
+          messageId: response.id,
+          threadId: response.threadId,
+          to,
+          subject,
+        },
       };
     });
 
