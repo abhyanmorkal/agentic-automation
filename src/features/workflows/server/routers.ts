@@ -1,4 +1,3 @@
-import { TRPCError } from "@trpc/server";
 import type { Edge, Node } from "@xyflow/react";
 import { generateSlug } from "random-word-slugs";
 import z from "zod";
@@ -11,6 +10,11 @@ import {
   premiumProcedure,
   protectedProcedure,
 } from "@/trpc/init";
+import { toTRPCError } from "../lib/errors";
+import {
+  buildValidatedExecutionPlan,
+  validateWorkflowDraft,
+} from "../lib/validation";
 
 export const workflowsRouter = createTRPCRouter({
   execute: protectedProcedure
@@ -21,22 +25,23 @@ export const workflowsRouter = createTRPCRouter({
           id: input.id,
           userId: ctx.auth.user.id,
         },
-        include: { nodes: true },
+        include: { nodes: true, connections: true },
       });
 
-      const hasRunnableNodes = workflow.nodes.some(
-        (node) => node.type !== NodeType.INITIAL,
-      );
-      if (!hasRunnableNodes) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "Add at least one trigger or action to your workflow, then save and run again.",
-        });
-      }
-
       try {
-        // Manual execution always runs regardless of active/paused state
+        const credentialIds = (
+          await prisma.credential.findMany({
+            where: { userId: ctx.auth.user.id },
+            select: { id: true },
+          })
+        ).map((credential) => credential.id);
+
+        buildValidatedExecutionPlan({
+          workflow,
+          initialData: {},
+          credentialIds,
+        });
+
         await sendWorkflowExecution(
           {
             workflowId: input.id,
@@ -44,12 +49,8 @@ export const workflowsRouter = createTRPCRouter({
           },
           { checkActive: false },
         );
-      } catch (err) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message:
-            err instanceof Error ? err.message : "Failed to execute workflow",
-        });
+      } catch (error) {
+        throw toTRPCError(error, "Failed to execute workflow");
       }
 
       return workflow;
@@ -108,14 +109,17 @@ export const workflowsRouter = createTRPCRouter({
         where: { id, userId: ctx.auth.user.id },
       });
 
-      // Transaction to ensure consistency
+      try {
+        validateWorkflowDraft({ nodes, edges });
+      } catch (error) {
+        throw toTRPCError(error, "Failed to save workflow");
+      }
+
       return await prisma.$transaction(async (tx) => {
-        // Delete existing nodes and connections (cascade deletes connections)
         await tx.node.deleteMany({
           where: { workflowId: id },
         });
 
-        // Create nodes
         await tx.node.createMany({
           data: nodes.map((node) => ({
             id: node.id,
@@ -127,7 +131,6 @@ export const workflowsRouter = createTRPCRouter({
           })),
         });
 
-        // Create connections
         await tx.connection.createMany({
           data: edges.map((edge) => ({
             workflowId: id,
@@ -138,7 +141,6 @@ export const workflowsRouter = createTRPCRouter({
           })),
         });
 
-        // Update workflow's updateAt timestamp
         await tx.workflow.update({
           where: { id },
           data: { updatedAt: new Date() },
@@ -171,7 +173,6 @@ export const workflowsRouter = createTRPCRouter({
         include: { nodes: true, connections: true },
       });
 
-      // Transform server nodes to react-flow compatible nodes
       const nodes: Node[] = workflow.nodes.map((node) => ({
         id: node.id,
         type: node.type,
@@ -179,7 +180,6 @@ export const workflowsRouter = createTRPCRouter({
         data: (node.data as Record<string, unknown>) || {},
       }));
 
-      // Transform server connections to react-flow compatible edges
       const edges: Edge[] = workflow.connections.map((connection) => ({
         id: connection.id,
         source: connection.fromNodeId,

@@ -6,6 +6,8 @@ import {
   getNodeExecutionOutput,
   getPublicContext,
 } from "@/features/executions/lib/runtime-context";
+import { formatAppErrorForLogs } from "@/features/workflows/lib/errors";
+import { buildValidatedExecutionPlan } from "@/features/workflows/lib/validation";
 import { ExecutionStatus, NodeType, Prisma } from "@/generated/prisma";
 import prisma from "@/lib/db";
 import { airtableChannel } from "./channels/airtable";
@@ -36,20 +38,19 @@ import { inngest } from "./client";
 import { cronMatchesNow } from "./cron-utils";
 import {
   attachExecutionMetadata,
-  planWorkflowExecution,
   stripExecutionMetadata,
 } from "./execution-plan";
 
 const getErrorDetails = (error: unknown) => {
   if (error instanceof Error) {
     return {
-      error: error.message,
+      error: formatAppErrorForLogs(error),
       errorStack: error.stack,
     };
   }
 
   return {
-    error: typeof error === "string" ? error : "Unknown node execution error",
+    error: formatAppErrorForLogs(error),
     errorStack: undefined,
   };
 };
@@ -143,7 +144,18 @@ export const executeWorkflow = inngest.createFunction(
         },
       });
 
-      return planWorkflowExecution(workflow, executionInitialData);
+      const credentialIds = (
+        await prisma.credential.findMany({
+          where: { userId: workflow.userId },
+          select: { id: true },
+        })
+      ).map((credential) => credential.id);
+
+      return buildValidatedExecutionPlan({
+        workflow,
+        initialData: executionInitialData,
+        credentialIds,
+      });
     });
 
     const userId = await step.run("find-user-id", async () => {
@@ -157,12 +169,10 @@ export const executeWorkflow = inngest.createFunction(
       return workflow.userId;
     });
 
-    // Initialize context with any initial data from the trigger
     let context = createExecutionContext(
       stripExecutionMetadata(executionInitialData),
     );
 
-    // Execute each node on the selected trigger path only.
     for (const [index, node] of executionPlan.nodes.entries()) {
       const executor = getExecutor(node.type as NodeType);
       const nodeInput = getPublicContext(context);
@@ -275,10 +285,6 @@ export const executeWorkflow = inngest.createFunction(
   },
 );
 
-/**
- * Runs every minute and fires any workflow whose SCHEDULE_TRIGGER cron
- * expression matches the current UTC minute.
- */
 export const scheduleDispatcher = inngest.createFunction(
   { id: "schedule-dispatcher" },
   { cron: "* * * * *" },

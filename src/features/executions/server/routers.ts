@@ -1,6 +1,7 @@
-import { TRPCError } from "@trpc/server";
 import z from "zod";
 import { PAGINATION } from "@/config/constants";
+import { toTRPCError } from "@/features/workflows/lib/errors";
+import { buildValidatedExecutionPlan } from "@/features/workflows/lib/validation";
 import type { NodeType } from "@/generated/prisma";
 import { EXECUTION_METADATA_KEY } from "@/inngest/execution-plan";
 import { sendWorkflowExecution } from "@/inngest/utils";
@@ -42,6 +43,24 @@ export const executionsRouter = createTRPCRouter({
             ? (runtimeMetadata.triggerType as NodeType)
             : undefined;
 
+        const workflow = await prisma.workflow.findUniqueOrThrow({
+          where: { id: execution.workflowId, userId: ctx.auth.user.id },
+          include: { nodes: true, connections: true },
+        });
+        const credentialIds = (
+          await prisma.credential.findMany({
+            where: { userId: ctx.auth.user.id },
+            select: { id: true },
+          })
+        ).map((credential) => credential.id);
+
+        buildValidatedExecutionPlan({
+          workflow,
+          initialData:
+            (execution.initialData as Record<string, unknown>) ?? undefined,
+          credentialIds,
+        });
+
         await sendWorkflowExecution({
           workflowId: execution.workflowId,
           triggerNodeId,
@@ -49,12 +68,8 @@ export const executionsRouter = createTRPCRouter({
           initialData:
             (execution.initialData as Record<string, unknown>) ?? undefined,
         });
-      } catch (err) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message:
-            err instanceof Error ? err.message : "Failed to retry execution",
-        });
+      } catch (error) {
+        throw toTRPCError(error, "Failed to retry execution");
       }
     }),
   getOne: protectedProcedure
