@@ -533,3 +533,125 @@ Add a `testFacebookConnection` server action and a button next to the credential
 
 *Conversation compacted*  Now implementing P2-3: HMAC webhook secret. I'll update all three files.
 
+Here’s the clean remaining backlog across the phases we’ve worked on.
+
+Phase 1
+Almost done. What remains is platform safety, not core security.
+
+Remaining:
+
+Workflow validation polish
+validate branch handles for IF
+validate merge topology
+validate trigger-specific config more deeply
+validate unreachable/dead-end paths more clearly
+Error taxonomy completion
+normalize provider errors
+mark retryable vs non-retryable more consistently
+surface structured error codes in UI/API responses
+Cleanup
+fix the two existing TypeScript errors in:
+stripe route
+sendwebhookdata route
+Phase 2
+This is the biggest remaining area. Core branching now exists, but the workflow engine still needs more control-flow depth and better data UX.
+
+Remaining:
+
+Add Switch
+Add Loop
+Add Delay Until
+Improve Merge
+explicit merge strategies
+combine selected node outputs
+clearer branch-join behavior
+Improve data mapping UX
+field-level picker, not only node-level references
+better schema-aware previews
+structured references instead of raw text insertion everywhere
+Extend reference picker to more nodes
+Gmail
+Send Email
+Slack
+Discord
+Telegram
+WhatsApp
+HTTP Request
+Google Drive
+Instagram
+Facebook Page
+Runtime improvements
+per-edge data semantics
+stronger branch replay/debugging
+clearer node input/output inspection for branched runs
+Phase 3
+The connector framework foundation is in place. What remains is turning it from “shared helper layer” into a real connector system.
+
+Remaining:
+
+Expand connector definitions
+action definitions
+trigger definitions
+config schema
+output schema
+test connection contract
+refresh lifecycle metadata
+provider error mapping
+Move more provider logic into src/integrations/*
+less feature-local API logic
+more shared provider execution helpers
+Standardize UI from connector metadata
+dialog copy
+setup requirements
+credential prompts
+provider labels/icons
+Move toward connector-definition-driven runtime
+less hardcoded node behavior
+more shared execution contracts per connector
+Phase 4 and beyond
+Still not started as full phases.
+
+Remaining:
+
+Phase 4: Trigger system upgrade
+first-class trigger gateway
+canonical trigger event format
+trigger-node targeting everywhere
+polling/manual/test trigger consistency
+Phase 5: Variable system and data mapping
+structured references
+output explorer
+field picker UX
+template validation
+Phase 6: Observability
+execution timeline
+replay
+dead-letter/retry visibility
+provider response tracing
+Phase 7: Versioning and environments
+draft/published versions
+immutable execution snapshots
+environment-scoped credentials
+Phase 8: Multi-tenancy
+organizations
+memberships
+projects
+permissions
+quotas
+Phase 9: Advanced AI/runtime
+approval nodes
+extractor/router/classifier nodes
+schema-constrained AI outputs
+tool-calling patterns
+Best execution order from here
+
+Fix the 2 existing TypeScript errors
+Add Switch
+Improve field-level data mapping
+Add Delay Until
+Add Loop
+Strengthen connector definitions
+Start trigger gateway redesign
+Add workflow versioning
+Build observability/replay
+Add org/workspace model
