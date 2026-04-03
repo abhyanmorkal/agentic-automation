@@ -48,6 +48,7 @@ import {
   attachExecutionMetadata,
   stripExecutionMetadata,
 } from "./execution-plan";
+import { ExecutionScheduler } from "./execution-scheduler";
 
 const getErrorDetails = (error: unknown) => {
   if (error instanceof Error) {
@@ -80,14 +81,6 @@ const isNodeExecutionResult = (
 
 const normalizeOutputHandle = (handle: string | null | undefined) =>
   handle && handle.length > 0 ? handle : "main";
-
-type PlannedConnection = {
-  id: string;
-  fromNodeId: string;
-  toNodeId: string;
-  fromOutput: string;
-  toInput: string;
-};
 
 const getSelectedOutputs = ({
   nodeType,
@@ -234,63 +227,21 @@ export const executeWorkflow = inngest.createFunction(
     let context = createExecutionContext(
       stripExecutionMetadata(executionInitialData),
     );
-    const nodeOrder = new Map(
-      executionPlan.nodes.map((node, index) => [node.id, index]),
-    );
     const nodesById = new Map(
       executionPlan.nodes.map((node) => [node.id, node]),
     );
-    const outgoingConnections = new Map<string, PlannedConnection[]>();
-    const incomingConnections = new Map<string, PlannedConnection[]>();
-
-    for (const connection of executionPlan.connections) {
-      outgoingConnections.set(connection.fromNodeId, [
-        ...(outgoingConnections.get(connection.fromNodeId) ?? []),
-        connection,
-      ]);
-      incomingConnections.set(connection.toNodeId, [
-        ...(incomingConnections.get(connection.toNodeId) ?? []),
-        connection,
-      ]);
-    }
-
-    const executionQueue = [executionPlan.triggerNode.id];
-    const queuedNodeIds = new Set(executionQueue);
-    const executedNodeIds = new Set<string>();
-    const activeConnectionIds = new Set<string>();
-
-    const enqueueIfReady = (nodeId: string) => {
-      if (executedNodeIds.has(nodeId) || queuedNodeIds.has(nodeId)) {
-        return;
-      }
-
-      const activeIncoming = (incomingConnections.get(nodeId) ?? []).filter(
-        (connection) => activeConnectionIds.has(connection.id),
-      );
-
-      if (
-        activeIncoming.length > 0 &&
-        activeIncoming.every((connection) =>
-          executedNodeIds.has(connection.fromNodeId),
-        )
-      ) {
-        executionQueue.push(nodeId);
-        queuedNodeIds.add(nodeId);
-      }
-    };
+    const scheduler = new ExecutionScheduler(
+      executionPlan.nodes,
+      executionPlan.connections,
+      executionPlan.triggerNode.id,
+    );
 
     let executionIndex = 0;
 
-    while (executionQueue.length > 0) {
-      const currentNodeId = executionQueue.shift();
+    while (true) {
+      const currentNodeId = scheduler.nextNodeId();
       if (!currentNodeId) {
-        continue;
-      }
-
-      queuedNodeIds.delete(currentNodeId);
-
-      if (executedNodeIds.has(currentNodeId)) {
-        continue;
+        break;
       }
 
       const node = nodesById.get(currentNodeId);
@@ -379,7 +330,6 @@ export const executeWorkflow = inngest.createFunction(
         );
 
         context = runtimeContext;
-        executedNodeIds.add(node.id);
         executionIndex += 1;
 
         const selectedOutputs = getSelectedOutputs({
@@ -387,29 +337,10 @@ export const executeWorkflow = inngest.createFunction(
           nextOutputs: normalizedResult.nextOutputs,
           nodeOutput,
         });
-        const nextConnections = [...(outgoingConnections.get(node.id) ?? [])]
-          .filter((connection) => {
-            if (!selectedOutputs) {
-              return true;
-            }
-
-            return selectedOutputs.has(
-              normalizeOutputHandle(connection.fromOutput),
-            );
-          })
-          .sort(
-            (left, right) =>
-              (nodeOrder.get(left.toNodeId) ?? Number.MAX_SAFE_INTEGER) -
-              (nodeOrder.get(right.toNodeId) ?? Number.MAX_SAFE_INTEGER),
-          );
-
-        for (const connection of nextConnections) {
-          activeConnectionIds.add(connection.id);
-        }
-
-        for (const connection of nextConnections) {
-          enqueueIfReady(connection.toNodeId);
-        }
+        scheduler.markCompleted(
+          node.id,
+          selectedOutputs ? [...selectedOutputs] : undefined,
+        );
       } catch (error) {
         const details = getErrorDetails(error);
 
