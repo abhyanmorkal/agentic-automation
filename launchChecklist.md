@@ -379,9 +379,9 @@ This is the literal checklist to complete before inviting beta users.
 
 ### Engineering
 
-- [ ] Fix all known TypeScript errors
-- [ ] Verify latest Prisma migration applied in target environment
-- [ ] Add `Switch`
+- [x] Fix all known TypeScript errors
+- [x] Verify latest Prisma migration applied in target environment
+- [x] Add `Switch`
 - [ ] Add tests for the main execution patterns
 - [ ] Verify no blocking runtime regressions in control flow
 

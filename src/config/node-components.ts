@@ -19,6 +19,7 @@ import { OpenAiNode } from "@/features/executions/components/openai/node";
 import { SendEmailNode } from "@/features/executions/components/send-email/node";
 import { SendSmsNode } from "@/features/executions/components/send-sms/node";
 import { SlackNode } from "@/features/executions/components/slack/node";
+import { SwitchNode } from "@/features/executions/components/switch/node";
 import { TelegramNode } from "@/features/executions/components/telegram/node";
 import { WhatsAppNode } from "@/features/executions/components/whatsapp/node";
 import { FacebookLeadTriggerNode } from "@/features/triggers/components/facebook-lead-trigger/node";
@@ -33,6 +34,7 @@ export const nodeComponents = {
   [NodeType.INITIAL]: InitialNode,
   [NodeType.HTTP_REQUEST]: HttpRequestNode,
   [NodeType.IF]: IfNode,
+  [NodeType.SWITCH]: SwitchNode,
   [NodeType.DELAY]: DelayNode,
   [NodeType.MERGE]: MergeNode,
   [NodeType.MANUAL_TRIGGER]: ManualTriggerNode,

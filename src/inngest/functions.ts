@@ -38,6 +38,7 @@ import { sendEmailChannel } from "./channels/send-email";
 import { sendSmsChannel } from "./channels/send-sms";
 import { slackChannel } from "./channels/slack";
 import { stripeTriggerChannel } from "./channels/stripe-trigger";
+import { switchChannel } from "./channels/switch";
 import { telegramChannel } from "./channels/telegram";
 import { webhookTriggerChannel } from "./channels/webhook-trigger";
 import { whatsappChannel } from "./channels/whatsapp";
@@ -143,6 +144,7 @@ export const executeWorkflow = inngest.createFunction(
     channels: [
       httpRequestChannel(),
       ifChannel(),
+      switchChannel(),
       delayChannel(),
       mergeChannel(),
       manualTriggerChannel(),

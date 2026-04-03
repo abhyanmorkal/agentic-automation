@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
-import { NodeType } from "@/generated/prisma";
+import { NodeType, Prisma } from "@/generated/prisma";
 import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
 import { decodeTriggerToken } from "@/lib/trigger-token";
@@ -74,6 +74,16 @@ async function parseRequestBody(
     body: text ? { raw: text } : {},
   };
 }
+
+const asJsonValue = (
+  value: unknown,
+): Prisma.InputJsonValue | typeof Prisma.JsonNull => {
+  if (value === null || value === undefined) {
+    return Prisma.JsonNull;
+  }
+
+  return value as Prisma.InputJsonValue;
+};
 
 export async function POST(
   request: NextRequest,
@@ -177,7 +187,7 @@ export async function POST(
     await prisma.node.update({
       where: { id: node.id },
       data: {
-        data: updatedData,
+        data: asJsonValue(updatedData),
       },
     });
 

@@ -18,6 +18,7 @@ import {
   MailIcon,
   MousePointerIcon,
   PlugIcon,
+  RouteIcon,
   SmartphoneIcon,
   WebhookIcon,
 } from "lucide-react";
@@ -41,6 +42,7 @@ import { Separator } from "./ui/separator";
  */
 const ENABLED_NODE_TYPES: Set<NodeType> = new Set([
   NodeType.IF,
+  NodeType.SWITCH,
   NodeType.DELAY,
   NodeType.MERGE,
   NodeType.FACEBOOK_LEAD_TRIGGER,
@@ -241,6 +243,13 @@ const controlFlowNodes: NodeTypeOption[] = [
     description:
       "Pause the workflow for a set number of seconds, minutes, or hours",
     icon: ClockIcon,
+  },
+  {
+    type: NodeType.SWITCH,
+    label: "Switch",
+    description:
+      "Route the workflow to one of several exact-match cases, with a default fallback",
+    icon: RouteIcon,
   },
   {
     type: NodeType.MERGE,

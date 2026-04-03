@@ -5,6 +5,9 @@ import prisma from "@/lib/db";
 import { decodeTriggerToken } from "@/lib/trigger-token";
 import { verifyStripeSignature } from "@/lib/webhook-security";
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export async function POST(request: NextRequest) {
   try {
     const url = new URL(request.url);
@@ -53,6 +56,7 @@ export async function POST(request: NextRequest) {
       string,
       unknown
     >;
+    const eventData = isRecord(body.data) ? body.data : null;
 
     const stripeData = {
       // Event metadata
@@ -60,7 +64,7 @@ export async function POST(request: NextRequest) {
       eventType: body.type,
       timestamp: body.created,
       livemode: body.livemode,
-      raw: body.data?.object,
+      raw: eventData?.object,
     };
 
     // Trigger an Inngest job

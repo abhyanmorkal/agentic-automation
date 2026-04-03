@@ -66,6 +66,10 @@ const NODE_FIELD_LABELS: Partial<
     { field: "leftValue", label: "Left value" },
     { field: "operator", label: "Operator" },
   ],
+  [NodeType.SWITCH]: [
+    { field: "sourceValue", label: "Source value" },
+    { field: "cases", label: "Cases" },
+  ],
   [NodeType.DELAY]: [
     { field: "amount", label: "Amount" },
     { field: "unit", label: "Unit" },
@@ -280,6 +284,25 @@ export const validateWorkflowDraft = ({
           createIssue(`${nodeType}: ${requirement.label} is required`, {
             nodeId: node.id,
             field: requirement.field,
+          }),
+        );
+      }
+    }
+
+    if (nodeType === NodeType.SWITCH) {
+      const cases = Array.isArray(data.cases) ? data.cases : [];
+      const hasConfiguredCase = cases.some(
+        (item) =>
+          isRecord(item) &&
+          typeof item.value === "string" &&
+          item.value.trim().length > 0,
+      );
+
+      if (!hasConfiguredCase) {
+        issues.push(
+          createIssue("SWITCH: Add at least one case with a match value", {
+            nodeId: node.id,
+            field: "cases",
           }),
         );
       }

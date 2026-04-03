@@ -25,6 +25,7 @@ import { openAiExecutor } from "../components/openai/executor";
 import { sendEmailExecutor } from "../components/send-email/executor";
 import { sendSmsExecutor } from "../components/send-sms/executor";
 import { slackExecutor } from "../components/slack/executor";
+import { switchExecutor } from "../components/switch/executor";
 import { telegramExecutor } from "../components/telegram/executor";
 import { whatsappExecutor } from "../components/whatsapp/executor";
 import type { NodeExecutor } from "../types";
@@ -34,6 +35,7 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.MANUAL_TRIGGER]: manualTriggerExecutor,
   [NodeType.HTTP_REQUEST]: httpRequestExecutor,
   [NodeType.IF]: ifExecutor,
+  [NodeType.SWITCH]: switchExecutor,
   [NodeType.DELAY]: delayExecutor,
   [NodeType.MERGE]: mergeExecutor,
   [NodeType.GOOGLE_FORM_TRIGGER]: googleFormTriggerExecutor,
