@@ -8,6 +8,7 @@ import { stripeTriggerExecutor } from "@/features/triggers/components/stripe-tri
 import { webhookTriggerExecutor } from "@/features/triggers/components/webhook-trigger/executor";
 import { airtableExecutor } from "../components/airtable/executor";
 import { anthropicExecutor } from "../components/anthropic/executor";
+import { delayExecutor } from "../components/delay/executor";
 import { discordExecutor } from "../components/discord/executor";
 import { facebookPageExecutor } from "../components/facebook-page/executor";
 import { geminiExecutor } from "../components/gemini/executor";
@@ -15,8 +16,10 @@ import { gmailExecutor } from "../components/gmail/executor";
 import { googleDriveExecutor } from "../components/google-drive/executor";
 import { googleSheetsExecutor } from "../components/google-sheets/executor";
 import { httpRequestExecutor } from "../components/http-request/executor";
+import { ifExecutor } from "../components/if/executor";
 import { instagramExecutor } from "../components/instagram/executor";
 import { mcpToolExecutor } from "../components/mcp-tool/executor";
+import { mergeExecutor } from "../components/merge/executor";
 import { notionExecutor } from "../components/notion/executor";
 import { openAiExecutor } from "../components/openai/executor";
 import { sendEmailExecutor } from "../components/send-email/executor";
@@ -30,6 +33,9 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.INITIAL]: manualTriggerExecutor,
   [NodeType.MANUAL_TRIGGER]: manualTriggerExecutor,
   [NodeType.HTTP_REQUEST]: httpRequestExecutor,
+  [NodeType.IF]: ifExecutor,
+  [NodeType.DELAY]: delayExecutor,
+  [NodeType.MERGE]: mergeExecutor,
   [NodeType.GOOGLE_FORM_TRIGGER]: googleFormTriggerExecutor,
   [NodeType.STRIPE_TRIGGER]: stripeTriggerExecutor,
   [NodeType.WEBHOOK_TRIGGER]: webhookTriggerExecutor,

@@ -101,14 +101,14 @@ export const attachNodeResultToContext = (
   previousContext: WorkflowContext,
   nextContext: WorkflowContext,
   node: RuntimeNode,
+  explicitOutput?: unknown,
 ) => {
   const previousPublicContext = getPublicContext(previousContext);
   const nextPublicContext = getPublicContext(nextContext);
-  const nodeOutput = extractNodeOutput(
-    previousPublicContext,
-    nextPublicContext,
-    node,
-  );
+  const nodeOutput =
+    explicitOutput !== undefined
+      ? explicitOutput
+      : extractNodeOutput(previousPublicContext, nextPublicContext, node);
   const variableName = getVariableName(node);
   const runtimeState = getRuntimeState(previousContext);
 

@@ -1,35 +1,40 @@
-import { InitialNode } from "@/components/initial-node";
-import { NodeType } from "@/generated/prisma";
 import type { NodeTypes } from "@xyflow/react";
-
-import { HttpRequestNode } from "@/features/executions/components/http-request/node";
-import { ManualTriggerNode } from "@/features/triggers/components/manual-trigger/node";
-import { GoogleFormTrigger } from "@/features/triggers/components/google-form-trigger/node";
-import { StripeTriggerNode } from "@/features/triggers/components/stripe-trigger/node";
-import { WebhookTriggerNode } from "@/features/triggers/components/webhook-trigger/node";
-import { ScheduleTriggerNode } from "@/features/triggers/components/schedule-trigger/node";
-import { GeminiNode } from "@/features/executions/components/gemini/node";
-import { OpenAiNode } from "@/features/executions/components/openai/node";
-import { AnthropicNode } from "@/features/executions/components/anthropic/node";
-import { DiscordNode } from "@/features/executions/components/discord/node";
-import { SlackNode } from "@/features/executions/components/slack/node";
-import { TelegramNode } from "@/features/executions/components/telegram/node";
-import { NotionNode } from "@/features/executions/components/notion/node";
+import { InitialNode } from "@/components/initial-node";
 import { AirtableNode } from "@/features/executions/components/airtable/node";
+import { AnthropicNode } from "@/features/executions/components/anthropic/node";
+import { DelayNode } from "@/features/executions/components/delay/node";
+import { DiscordNode } from "@/features/executions/components/discord/node";
+import { FacebookPageNode } from "@/features/executions/components/facebook-page/node";
+import { GeminiNode } from "@/features/executions/components/gemini/node";
+import { GmailNode } from "@/features/executions/components/gmail/node";
+import { GoogleDriveNode } from "@/features/executions/components/google-drive/node";
+import { GoogleSheetsNode } from "@/features/executions/components/google-sheets/node";
+import { HttpRequestNode } from "@/features/executions/components/http-request/node";
+import { IfNode } from "@/features/executions/components/if/node";
+import { InstagramNode } from "@/features/executions/components/instagram/node";
+import { McpToolNode } from "@/features/executions/components/mcp-tool/node";
+import { MergeNode } from "@/features/executions/components/merge/node";
+import { NotionNode } from "@/features/executions/components/notion/node";
+import { OpenAiNode } from "@/features/executions/components/openai/node";
 import { SendEmailNode } from "@/features/executions/components/send-email/node";
 import { SendSmsNode } from "@/features/executions/components/send-sms/node";
-import { GmailNode } from "@/features/executions/components/gmail/node";
-import { GoogleSheetsNode } from "@/features/executions/components/google-sheets/node";
-import { GoogleDriveNode } from "@/features/executions/components/google-drive/node";
+import { SlackNode } from "@/features/executions/components/slack/node";
+import { TelegramNode } from "@/features/executions/components/telegram/node";
 import { WhatsAppNode } from "@/features/executions/components/whatsapp/node";
-import { InstagramNode } from "@/features/executions/components/instagram/node";
-import { FacebookPageNode } from "@/features/executions/components/facebook-page/node";
 import { FacebookLeadTriggerNode } from "@/features/triggers/components/facebook-lead-trigger/node";
-import { McpToolNode } from "@/features/executions/components/mcp-tool/node";
+import { GoogleFormTrigger } from "@/features/triggers/components/google-form-trigger/node";
+import { ManualTriggerNode } from "@/features/triggers/components/manual-trigger/node";
+import { ScheduleTriggerNode } from "@/features/triggers/components/schedule-trigger/node";
+import { StripeTriggerNode } from "@/features/triggers/components/stripe-trigger/node";
+import { WebhookTriggerNode } from "@/features/triggers/components/webhook-trigger/node";
+import { NodeType } from "@/generated/prisma";
 
 export const nodeComponents = {
   [NodeType.INITIAL]: InitialNode,
   [NodeType.HTTP_REQUEST]: HttpRequestNode,
+  [NodeType.IF]: IfNode,
+  [NodeType.DELAY]: DelayNode,
+  [NodeType.MERGE]: MergeNode,
   [NodeType.MANUAL_TRIGGER]: ManualTriggerNode,
   [NodeType.GOOGLE_FORM_TRIGGER]: GoogleFormTrigger,
   [NodeType.STRIPE_TRIGGER]: StripeTriggerNode,

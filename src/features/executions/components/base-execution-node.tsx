@@ -5,12 +5,21 @@ import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
 import type { ComponentType } from "react";
 import { memo, type ReactNode } from "react";
-import { BaseNode, BaseNodeContent } from "@/components/react-flow/base-node";
 import { BaseHandle } from "@/components/react-flow/base-handle";
+import { BaseNode, BaseNodeContent } from "@/components/react-flow/base-node";
+import {
+  type NodeStatus,
+  NodeStatusIndicator,
+} from "@/components/react-flow/node-status-indicator";
 import { WorkflowNode } from "@/components/workflow-node";
-import { type NodeStatus, NodeStatusIndicator } from "@/components/react-flow/node-status-indicator";
 
-type AnyIconComponent = LucideIcon | ComponentType<{ className?: string; size?: number; style?: React.CSSProperties }>;
+type AnyIconComponent =
+  | LucideIcon
+  | ComponentType<{
+      className?: string;
+      size?: number;
+      style?: React.CSSProperties;
+    }>;
 
 interface BaseExecutionNodeProps extends NodeProps {
   icon: AnyIconComponent | string;
@@ -20,7 +29,10 @@ interface BaseExecutionNodeProps extends NodeProps {
   status?: NodeStatus;
   onSettings?: () => void;
   onDoubleClick?: () => void;
-};
+  customHandles?: ReactNode;
+  showDefaultSourceHandle?: boolean;
+  showDefaultTargetHandle?: boolean;
+}
 
 export const BaseExecutionNode = memo(
   ({
@@ -32,6 +44,9 @@ export const BaseExecutionNode = memo(
     status = "initial",
     onSettings,
     onDoubleClick,
+    customHandles,
+    showDefaultSourceHandle = true,
+    showDefaultTargetHandle = true,
   }: BaseExecutionNodeProps) => {
     const { setNodes, setEdges } = useReactFlow();
     const handleDelete = () => {
@@ -42,7 +57,7 @@ export const BaseExecutionNode = memo(
 
       setEdges((currentEdges) => {
         const updatedEdges = currentEdges.filter(
-          (edge) => edge.source !== id && edge.target !== id
+          (edge) => edge.source !== id && edge.target !== id,
         );
         return updatedEdges;
       });
@@ -55,10 +70,7 @@ export const BaseExecutionNode = memo(
         onDelete={handleDelete}
         onSettings={onSettings}
       >
-        <NodeStatusIndicator
-          status={status}
-          variant="border"
-        >
+        <NodeStatusIndicator status={status} variant="border">
           <BaseNode status={status} onDoubleClick={onDoubleClick}>
             <BaseNodeContent>
               {typeof Icon === "string" ? (
@@ -67,21 +79,26 @@ export const BaseExecutionNode = memo(
                 <Icon size={16} className="text-muted-foreground" />
               )}
               {children}
-              <BaseHandle
-                id="target-1"
-                type="target"
-                position={Position.Left}
-              />
-              <BaseHandle
-                id="source-1"
-                type="source"
-                position={Position.Right}
-              />
+              {customHandles}
+              {showDefaultTargetHandle ? (
+                <BaseHandle
+                  id="target-1"
+                  type="target"
+                  position={Position.Left}
+                />
+              ) : null}
+              {showDefaultSourceHandle ? (
+                <BaseHandle
+                  id="source-1"
+                  type="source"
+                  position={Position.Right}
+                />
+              ) : null}
             </BaseNodeContent>
           </BaseNode>
         </NodeStatusIndicator>
       </WorkflowNode>
-    )
+    );
   },
 );
 

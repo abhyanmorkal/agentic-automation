@@ -1,18 +1,27 @@
 "use client";
 
+import {
+  Anthropic,
+  Gemini,
+  Google,
+  Meta,
+  Notion,
+  OpenAI,
+} from "@lobehub/icons";
 import { createId } from "@paralleldrive/cuid2";
 import { useReactFlow } from "@xyflow/react";
 import {
   ClockIcon,
+  GitBranchIcon,
+  GitMergeIcon,
   GlobeIcon,
   MailIcon,
   MousePointerIcon,
   PlugIcon,
   SmartphoneIcon,
-  UsersIcon,
   WebhookIcon,
 } from "lucide-react";
-import { Anthropic, Gemini, Google, Meta, Notion, OpenAI } from "@lobehub/icons";
+import Image from "next/image";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import {
@@ -31,6 +40,9 @@ import { Separator } from "./ui/separator";
  * Change this list as you go through and enable each node.
  */
 const ENABLED_NODE_TYPES: Set<NodeType> = new Set([
+  NodeType.IF,
+  NodeType.DELAY,
+  NodeType.MERGE,
   NodeType.FACEBOOK_LEAD_TRIGGER,
   NodeType.GOOGLE_SHEETS,
   NodeType.WEBHOOK_TRIGGER,
@@ -47,7 +59,8 @@ const triggerNodes: NodeTypeOption[] = [
   {
     type: NodeType.MANUAL_TRIGGER,
     label: "Trigger manually",
-    description: "Runs the flow on clicking a button. Good for getting started quickly",
+    description:
+      "Runs the flow on clicking a button. Good for getting started quickly",
     icon: MousePointerIcon,
   },
   {
@@ -65,19 +78,22 @@ const triggerNodes: NodeTypeOption[] = [
   {
     type: NodeType.WEBHOOK_TRIGGER,
     label: "Webhook",
-    description: "Runs the flow when any HTTP POST is received — works with Razorpay, Typeform, Shopify, and more",
+    description:
+      "Runs the flow when any HTTP POST is received — works with Razorpay, Typeform, Shopify, and more",
     icon: WebhookIcon,
   },
   {
     type: NodeType.SCHEDULE_TRIGGER,
     label: "Schedule",
-    description: "Runs the flow automatically on a cron schedule — every hour, daily, weekly, or custom",
+    description:
+      "Runs the flow automatically on a cron schedule — every hour, daily, weekly, or custom",
     icon: ClockIcon,
   },
   {
     type: NodeType.FACEBOOK_LEAD_TRIGGER,
     label: "Facebook Lead Ads",
-    description: "Runs the flow when a new lead is submitted via a Facebook Lead Ads form",
+    description:
+      "Runs the flow when a new lead is submitted via a Facebook Lead Ads form",
     icon: Meta.Color,
   },
 ];
@@ -86,7 +102,8 @@ const aiNodes: NodeTypeOption[] = [
   {
     type: NodeType.OPENAI,
     label: "OpenAI",
-    description: "Uses OpenAI GPT-4 to generate text, summaries, or structured data",
+    description:
+      "Uses OpenAI GPT-4 to generate text, summaries, or structured data",
     icon: OpenAI,
   },
   {
@@ -173,7 +190,8 @@ const productivityNodes: NodeTypeOption[] = [
   {
     type: NodeType.AIRTABLE,
     label: "Airtable",
-    description: "Create records in an Airtable base — great for CRM and lead tracking",
+    description:
+      "Create records in an Airtable base — great for CRM and lead tracking",
     icon: "/logos/airtable.svg",
   },
 ];
@@ -203,8 +221,32 @@ const utilityNodes: NodeTypeOption[] = [
   {
     type: NodeType.MCP_TOOL,
     label: "MCP Tool",
-    description: "Connect to any MCP server and call its tools — GitHub, HubSpot, Linear, and 700+ more",
+    description:
+      "Connect to any MCP server and call its tools — GitHub, HubSpot, Linear, and 700+ more",
     icon: PlugIcon,
+  },
+];
+
+const controlFlowNodes: NodeTypeOption[] = [
+  {
+    type: NodeType.IF,
+    label: "IF",
+    description:
+      "Route the workflow through true or false branches based on a condition",
+    icon: GitBranchIcon,
+  },
+  {
+    type: NodeType.DELAY,
+    label: "Delay",
+    description:
+      "Pause the workflow for a set number of seconds, minutes, or hours",
+    icon: ClockIcon,
+  },
+  {
+    type: NodeType.MERGE,
+    label: "Merge",
+    description: "Join active paths back into a single downstream path",
+    icon: GitMergeIcon,
   },
 ];
 
@@ -220,6 +262,7 @@ const nodeGroups: NodeGroup[] = [
   { title: "Google Workspace", nodes: googleNodes },
   { title: "Productivity & CRM", nodes: productivityNodes },
   { title: "Social Media", nodes: socialNodes },
+  { title: "Control Flow", nodes: controlFlowNodes },
   { title: "Utilities", nodes: utilityNodes },
 ];
 
@@ -240,63 +283,87 @@ function NodeItem({
 }) {
   const Icon = nodeType.icon;
   return (
-    <div
-      role="button"
-      aria-disabled={!enabled}
-      tabIndex={enabled ? 0 : -1}
+    <button
+      type="button"
+      disabled={!enabled}
       className={`w-full justify-start h-auto py-4 px-4 rounded-none border-l-2 transition-colors ${
         enabled
           ? "cursor-pointer border-transparent hover:border-l-primary hover:bg-accent/30"
-          : "cursor-not-allowed border-transparent opacity-60 pointer-events-none"
+          : "cursor-not-allowed border-transparent opacity-60"
       }`}
-      onClick={enabled ? onClick : undefined}
-      onKeyDown={enabled ? (e) => e.key === "Enter" && onClick() : undefined}
+      onClick={onClick}
     >
       <div className="flex items-center gap-4 w-full overflow-hidden">
         {typeof Icon === "string" ? (
-          <img src={Icon} alt={nodeType.label} className="size-5 object-contain rounded-sm flex-shrink-0" />
+          <Image
+            src={Icon}
+            alt={nodeType.label}
+            width={20}
+            height={20}
+            className="size-5 object-contain rounded-sm flex-shrink-0"
+          />
         ) : (
           <Icon size={20} className="flex-shrink-0 text-muted-foreground" />
         )}
         <div className="flex flex-col items-start text-left min-w-0">
           <span className="font-medium text-sm">{nodeType.label}</span>
-          <span className="text-xs text-muted-foreground line-clamp-2">{nodeType.description}</span>
+          <span className="text-xs text-muted-foreground line-clamp-2">
+            {nodeType.description}
+          </span>
           {!enabled && (
-            <span className="text-[10px] text-muted-foreground/80 mt-0.5">Coming soon</span>
+            <span className="text-[10px] text-muted-foreground/80 mt-0.5">
+              Coming soon
+            </span>
           )}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
-export function NodeSelector({ open, onOpenChange, children }: NodeSelectorProps) {
+export function NodeSelector({
+  open,
+  onOpenChange,
+  children,
+}: NodeSelectorProps) {
   const { setNodes, getNodes, screenToFlowPosition } = useReactFlow();
 
-  const handleNodeSelect = useCallback((selection: NodeTypeOption) => {
-    if (selection.type === NodeType.MANUAL_TRIGGER) {
-      const nodes = getNodes();
-      const hasManualTrigger = nodes.some((node) => node.type === NodeType.MANUAL_TRIGGER);
-      if (hasManualTrigger) {
-        toast.error("Only one manual trigger is allowed per workflow");
-        return;
+  const handleNodeSelect = useCallback(
+    (selection: NodeTypeOption) => {
+      if (selection.type === NodeType.MANUAL_TRIGGER) {
+        const nodes = getNodes();
+        const hasManualTrigger = nodes.some(
+          (node) => node.type === NodeType.MANUAL_TRIGGER,
+        );
+        if (hasManualTrigger) {
+          toast.error("Only one manual trigger is allowed per workflow");
+          return;
+        }
       }
-    }
 
-    setNodes((nodes) => {
-      const hasInitialTrigger = nodes.some((node) => node.type === NodeType.INITIAL);
-      const centerX = window.innerWidth / 2;
-      const centerY = window.innerHeight / 2;
-      const flowPosition = screenToFlowPosition({
-        x: centerX + (Math.random() - 0.5) * 200,
-        y: centerY + (Math.random() - 0.5) * 200,
+      setNodes((nodes) => {
+        const hasInitialTrigger = nodes.some(
+          (node) => node.type === NodeType.INITIAL,
+        );
+        const centerX = window.innerWidth / 2;
+        const centerY = window.innerHeight / 2;
+        const flowPosition = screenToFlowPosition({
+          x: centerX + (Math.random() - 0.5) * 200,
+          y: centerY + (Math.random() - 0.5) * 200,
+        });
+        const newNode = {
+          id: createId(),
+          data: {},
+          position: flowPosition,
+          type: selection.type,
+        };
+        return hasInitialTrigger ? [newNode] : [...nodes, newNode];
       });
-      const newNode = { id: createId(), data: {}, position: flowPosition, type: selection.type };
-      return hasInitialTrigger ? [newNode] : [...nodes, newNode];
-    });
 
-    onOpenChange(false);
-  }, [setNodes, getNodes, onOpenChange, screenToFlowPosition]);
+      onOpenChange(false);
+    },
+    [setNodes, getNodes, onOpenChange, screenToFlowPosition],
+  );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -304,7 +371,9 @@ export function NodeSelector({ open, onOpenChange, children }: NodeSelectorProps
       <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
         <SheetHeader>
           <SheetTitle>Add a node</SheetTitle>
-          <SheetDescription>Select a trigger or action to add to your workflow.</SheetDescription>
+          <SheetDescription>
+            Select a trigger or action to add to your workflow.
+          </SheetDescription>
         </SheetHeader>
         <div className="mt-2">
           {nodeGroups.map((group, idx) => (

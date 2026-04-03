@@ -6,12 +6,17 @@ import {
   getNodeExecutionOutput,
   getPublicContext,
 } from "@/features/executions/lib/runtime-context";
+import type {
+  NodeExecutionResult,
+  WorkflowContext,
+} from "@/features/executions/types";
 import { formatAppErrorForLogs } from "@/features/workflows/lib/errors";
 import { buildValidatedExecutionPlan } from "@/features/workflows/lib/validation";
 import { ExecutionStatus, NodeType, Prisma } from "@/generated/prisma";
 import prisma from "@/lib/db";
 import { airtableChannel } from "./channels/airtable";
 import { anthropicChannel } from "./channels/anthropic";
+import { delayChannel } from "./channels/delay";
 import { discordChannel } from "./channels/discord";
 import { facebookLeadTriggerChannel } from "./channels/facebook-lead-trigger";
 import { facebookPageChannel } from "./channels/facebook-page";
@@ -21,9 +26,11 @@ import { googleDriveChannel } from "./channels/google-drive";
 import { googleFormTriggerChannel } from "./channels/google-form-trigger";
 import { googleSheetsChannel } from "./channels/google-sheets";
 import { httpRequestChannel } from "./channels/http-request";
+import { ifChannel } from "./channels/if";
 import { instagramChannel } from "./channels/instagram";
 import { manualTriggerChannel } from "./channels/manual-trigger";
 import { mcpToolChannel } from "./channels/mcp-tool";
+import { mergeChannel } from "./channels/merge";
 import { notionChannel } from "./channels/notion";
 import { openAiChannel } from "./channels/openai";
 import { scheduleTriggerChannel } from "./channels/schedule-trigger";
@@ -53,6 +60,56 @@ const getErrorDetails = (error: unknown) => {
     error: formatAppErrorForLogs(error),
     errorStack: undefined,
   };
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isNodeExecutionResult = (
+  value: WorkflowContext | NodeExecutionResult,
+): value is NodeExecutionResult => {
+  if (!isRecord(value) || !("context" in value) || !isRecord(value.context)) {
+    return false;
+  }
+
+  return Object.keys(value).every((key) =>
+    ["context", "output", "nextOutputs"].includes(key),
+  );
+};
+
+const normalizeOutputHandle = (handle: string | null | undefined) =>
+  handle && handle.length > 0 ? handle : "main";
+
+type PlannedConnection = {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  fromOutput: string;
+  toInput: string;
+};
+
+const getSelectedOutputs = ({
+  nodeType,
+  nextOutputs,
+  nodeOutput,
+}: {
+  nodeType: NodeType;
+  nextOutputs?: string[];
+  nodeOutput: unknown;
+}) => {
+  if (Array.isArray(nextOutputs) && nextOutputs.length > 0) {
+    return new Set(nextOutputs.map((handle) => normalizeOutputHandle(handle)));
+  }
+
+  if (
+    nodeType === NodeType.IF &&
+    isRecord(nodeOutput) &&
+    typeof nodeOutput.branch === "string"
+  ) {
+    return new Set([normalizeOutputHandle(nodeOutput.branch)]);
+  }
+
+  return null;
 };
 
 const asJsonValue = (
@@ -85,6 +142,9 @@ export const executeWorkflow = inngest.createFunction(
     event: "workflows/execute.workflow",
     channels: [
       httpRequestChannel(),
+      ifChannel(),
+      delayChannel(),
+      mergeChannel(),
       manualTriggerChannel(),
       googleFormTriggerChannel(),
       stripeTriggerChannel(),
@@ -172,45 +232,111 @@ export const executeWorkflow = inngest.createFunction(
     let context = createExecutionContext(
       stripExecutionMetadata(executionInitialData),
     );
+    const nodeOrder = new Map(
+      executionPlan.nodes.map((node, index) => [node.id, index]),
+    );
+    const nodesById = new Map(
+      executionPlan.nodes.map((node) => [node.id, node]),
+    );
+    const outgoingConnections = new Map<string, PlannedConnection[]>();
+    const incomingConnections = new Map<string, PlannedConnection[]>();
 
-    for (const [index, node] of executionPlan.nodes.entries()) {
+    for (const connection of executionPlan.connections) {
+      outgoingConnections.set(connection.fromNodeId, [
+        ...(outgoingConnections.get(connection.fromNodeId) ?? []),
+        connection,
+      ]);
+      incomingConnections.set(connection.toNodeId, [
+        ...(incomingConnections.get(connection.toNodeId) ?? []),
+        connection,
+      ]);
+    }
+
+    const executionQueue = [executionPlan.triggerNode.id];
+    const queuedNodeIds = new Set(executionQueue);
+    const executedNodeIds = new Set<string>();
+    const activeConnectionIds = new Set<string>();
+
+    const enqueueIfReady = (nodeId: string) => {
+      if (executedNodeIds.has(nodeId) || queuedNodeIds.has(nodeId)) {
+        return;
+      }
+
+      const activeIncoming = (incomingConnections.get(nodeId) ?? []).filter(
+        (connection) => activeConnectionIds.has(connection.id),
+      );
+
+      if (
+        activeIncoming.length > 0 &&
+        activeIncoming.every((connection) =>
+          executedNodeIds.has(connection.fromNodeId),
+        )
+      ) {
+        executionQueue.push(nodeId);
+        queuedNodeIds.add(nodeId);
+      }
+    };
+
+    let executionIndex = 0;
+
+    while (executionQueue.length > 0) {
+      const currentNodeId = executionQueue.shift();
+      if (!currentNodeId) {
+        continue;
+      }
+
+      queuedNodeIds.delete(currentNodeId);
+
+      if (executedNodeIds.has(currentNodeId)) {
+        continue;
+      }
+
+      const node = nodesById.get(currentNodeId);
+      if (!node) {
+        continue;
+      }
+
       const executor = getExecutor(node.type as NodeType);
       const nodeInput = getPublicContext(context);
+      const currentOrderIndex = executionIndex;
 
-      await step.run(`node-${index + 1}-${node.id}-start`, async () => {
-        return prisma.executionNode.upsert({
-          where: {
-            executionId_nodeId: {
+      await step.run(
+        `node-${currentOrderIndex + 1}-${node.id}-start`,
+        async () => {
+          return prisma.executionNode.upsert({
+            where: {
+              executionId_nodeId: {
+                executionId: execution.id,
+                nodeId: node.id,
+              },
+            },
+            update: {
+              nodeName: node.name,
+              nodeType: node.type,
+              orderIndex: currentOrderIndex,
+              status: ExecutionStatus.RUNNING,
+              input: asJsonValue(nodeInput),
+              output: Prisma.JsonNull,
+              error: null,
+              errorStack: null,
+              startedAt: new Date(),
+              completedAt: null,
+            },
+            create: {
               executionId: execution.id,
               nodeId: node.id,
+              nodeName: node.name,
+              nodeType: node.type,
+              orderIndex: currentOrderIndex,
+              status: ExecutionStatus.RUNNING,
+              input: asJsonValue(nodeInput),
             },
-          },
-          update: {
-            nodeName: node.name,
-            nodeType: node.type,
-            orderIndex: index,
-            status: ExecutionStatus.RUNNING,
-            input: asJsonValue(nodeInput),
-            output: Prisma.JsonNull,
-            error: null,
-            errorStack: null,
-            startedAt: new Date(),
-            completedAt: null,
-          },
-          create: {
-            executionId: execution.id,
-            nodeId: node.id,
-            nodeName: node.name,
-            nodeType: node.type,
-            orderIndex: index,
-            status: ExecutionStatus.RUNNING,
-            input: asJsonValue(nodeInput),
-          },
-        });
-      });
+          });
+        },
+      );
 
       try {
-        const nextContext = await executor({
+        const executorResult = await executor({
           data: node.data as Record<string, unknown>,
           nodeId: node.id,
           userId,
@@ -219,49 +345,91 @@ export const executeWorkflow = inngest.createFunction(
           publish,
         });
 
+        const normalizedResult = isNodeExecutionResult(executorResult)
+          ? executorResult
+          : { context: executorResult };
+
         const runtimeContext = attachNodeResultToContext(
           context,
-          nextContext,
+          normalizedResult.context,
           node,
+          normalizedResult.output,
         );
         const nodeOutput = getNodeExecutionOutput(runtimeContext, node.id);
 
-        await step.run(`node-${index + 1}-${node.id}-success`, async () => {
-          return prisma.executionNode.update({
-            where: {
-              executionId_nodeId: {
-                executionId: execution.id,
-                nodeId: node.id,
+        await step.run(
+          `node-${currentOrderIndex + 1}-${node.id}-success`,
+          async () => {
+            return prisma.executionNode.update({
+              where: {
+                executionId_nodeId: {
+                  executionId: execution.id,
+                  nodeId: node.id,
+                },
               },
-            },
-            data: {
-              status: ExecutionStatus.SUCCESS,
-              output: asJsonValue(nodeOutput),
-              completedAt: new Date(),
-            },
-          });
-        });
+              data: {
+                status: ExecutionStatus.SUCCESS,
+                output: asJsonValue(nodeOutput),
+                completedAt: new Date(),
+              },
+            });
+          },
+        );
 
         context = runtimeContext;
+        executedNodeIds.add(node.id);
+        executionIndex += 1;
+
+        const selectedOutputs = getSelectedOutputs({
+          nodeType: node.type,
+          nextOutputs: normalizedResult.nextOutputs,
+          nodeOutput,
+        });
+        const nextConnections = [...(outgoingConnections.get(node.id) ?? [])]
+          .filter((connection) => {
+            if (!selectedOutputs) {
+              return true;
+            }
+
+            return selectedOutputs.has(
+              normalizeOutputHandle(connection.fromOutput),
+            );
+          })
+          .sort(
+            (left, right) =>
+              (nodeOrder.get(left.toNodeId) ?? Number.MAX_SAFE_INTEGER) -
+              (nodeOrder.get(right.toNodeId) ?? Number.MAX_SAFE_INTEGER),
+          );
+
+        for (const connection of nextConnections) {
+          activeConnectionIds.add(connection.id);
+        }
+
+        for (const connection of nextConnections) {
+          enqueueIfReady(connection.toNodeId);
+        }
       } catch (error) {
         const details = getErrorDetails(error);
 
-        await step.run(`node-${index + 1}-${node.id}-failed`, async () => {
-          return prisma.executionNode.update({
-            where: {
-              executionId_nodeId: {
-                executionId: execution.id,
-                nodeId: node.id,
+        await step.run(
+          `node-${currentOrderIndex + 1}-${node.id}-failed`,
+          async () => {
+            return prisma.executionNode.update({
+              where: {
+                executionId_nodeId: {
+                  executionId: execution.id,
+                  nodeId: node.id,
+                },
               },
-            },
-            data: {
-              status: ExecutionStatus.FAILED,
-              error: details.error,
-              errorStack: details.errorStack,
-              completedAt: new Date(),
-            },
-          });
-        });
+              data: {
+                status: ExecutionStatus.FAILED,
+                error: details.error,
+                errorStack: details.errorStack,
+                completedAt: new Date(),
+              },
+            });
+          },
+        );
 
         throw error;
       }

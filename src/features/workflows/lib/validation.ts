@@ -62,6 +62,14 @@ const NODE_FIELD_LABELS: Partial<
     { field: "endpoint", label: "Endpoint" },
     { field: "method", label: "Method" },
   ],
+  [NodeType.IF]: [
+    { field: "leftValue", label: "Left value" },
+    { field: "operator", label: "Operator" },
+  ],
+  [NodeType.DELAY]: [
+    { field: "amount", label: "Amount" },
+    { field: "unit", label: "Unit" },
+  ],
   [NodeType.SLACK]: [
     { field: "variableName", label: "Variable name" },
     { field: "webhookUrl", label: "Webhook URL" },
@@ -174,6 +182,22 @@ const getNodeType = (node: DraftNode) => {
 const getNonEmptyString = (value: unknown) =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const hasRequiredValue = (value: unknown) => {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value === "boolean") {
+    return true;
+  }
+
+  return value !== null && value !== undefined;
+};
+
 const createIssue = (
   message: string,
   issue: Omit<WorkflowValidationIssue, "message"> = {},
@@ -251,7 +275,7 @@ export const validateWorkflowDraft = ({
     }
 
     for (const requirement of NODE_FIELD_LABELS[nodeType] ?? []) {
-      if (!getNonEmptyString(data[requirement.field])) {
+      if (!hasRequiredValue(data[requirement.field])) {
         issues.push(
           createIssue(`${nodeType}: ${requirement.label} is required`, {
             nodeId: node.id,

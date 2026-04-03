@@ -193,5 +193,6 @@ export const planWorkflowExecution = (
   return {
     triggerNode,
     nodes: topologicalSort(reachableNodes, reachableConnections),
+    connections: reachableConnections,
   };
 };
