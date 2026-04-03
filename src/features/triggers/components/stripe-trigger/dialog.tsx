@@ -1,7 +1,6 @@
 "use client";
 
 import { CopyIcon } from "lucide-react";
-import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { encodeTriggerToken } from "@/lib/trigger-token";
+import { useTriggerToken } from "@/features/triggers/hooks/use-trigger-token";
 
 interface Props {
   open: boolean;
@@ -22,13 +21,13 @@ interface Props {
 }
 
 export const StripeTriggerDialog = ({ open, onOpenChange, nodeId }: Props) => {
-  const params = useParams();
-  const workflowId = params.workflowId as string;
-  const token = encodeTriggerToken({ workflowId, nodeId });
+  const { token, ready } = useTriggerToken(nodeId);
 
   // Construct the webhook URL
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const webhookUrl = `${baseUrl}/api/webhooks/stripe?token=${token}`;
+  const webhookUrl = token
+    ? `${baseUrl}/api/webhooks/stripe?token=${token}`
+    : "";
 
   const copyToClipboard = async () => {
     try {
@@ -64,10 +63,16 @@ export const StripeTriggerDialog = ({ open, onOpenChange, nodeId }: Props) => {
                 size="icon"
                 variant="outline"
                 onClick={copyToClipboard}
+                disabled={!ready}
               >
                 <CopyIcon className="size-4" />
               </Button>
             </div>
+            {!ready && (
+              <p className="text-xs text-muted-foreground">
+                Generating a signed webhook URL...
+              </p>
+            )}
           </div>
 
           <div className="rounded-lg bg-muted p-4 space-y-2">

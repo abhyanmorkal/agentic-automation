@@ -12,7 +12,6 @@ import {
   RefreshCwIcon,
   ZapIcon,
 } from "lucide-react";
-import { useParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -51,9 +50,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
+import { useTriggerToken } from "@/features/triggers/hooks/use-trigger-token";
 import { CredentialType } from "@/generated/prisma";
 import { getRequiredConnectorForCredentialType } from "@/integrations/core/registry";
-import { encodeTriggerToken } from "@/lib/trigger-token";
 import { useTRPC } from "@/trpc/client";
 import {
   type FacebookLeadForm,
@@ -122,11 +121,11 @@ export const FacebookLeadTriggerDialog = ({
   const metaConnector = getRequiredConnectorForCredentialType(
     CredentialType.META_ACCESS_TOKEN,
   );
-  const params = useParams();
-  const workflowId = params.workflowId as string;
+  const { workflowId, token, ready } = useTriggerToken(nodeId);
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const token = encodeTriggerToken({ workflowId, nodeId });
-  const webhookUrl = `${baseUrl}/api/webhooks/facebook-leads?token=${token}`;
+  const webhookUrl = token
+    ? `${baseUrl}/api/webhooks/facebook-leads?token=${token}`
+    : "";
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -856,10 +855,16 @@ export const FacebookLeadTriggerDialog = ({
                             variant="outline"
                             className="h-8 w-8 shrink-0"
                             onClick={copyWebhookUrl}
+                            disabled={!ready}
                           >
                             <CopyIcon className="size-3.5" />
                           </Button>
                         </div>
+                        {!ready && (
+                          <p className="text-[10px] text-muted-foreground">
+                            Generating a signed webhook URL...
+                          </p>
+                        )}
                       </div>
 
                       <div className="space-y-1">
@@ -1029,7 +1034,7 @@ export const FacebookLeadTriggerDialog = ({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        disabled={sendingTest}
+                        disabled={sendingTest || !ready}
                         onClick={handleSendTestLead}
                         className="gap-1.5 h-7 text-xs"
                       >

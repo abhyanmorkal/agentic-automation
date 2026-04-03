@@ -1,8 +1,9 @@
-import { type NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/db";
-import { auth } from "@/lib/auth";
-import { decrypt } from "@/lib/encryption";
 import ky from "ky";
+import { type NextRequest, NextResponse } from "next/server";
+import { parseGoogleApiError } from "@/integrations/google/auth";
+import { auth } from "@/lib/auth";
+import prisma from "@/lib/db";
+import { decrypt } from "@/lib/encryption";
 
 type RequestBody = {
   credentialId: string;
@@ -46,7 +47,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (!credential) {
-      return NextResponse.json({ error: "Credential not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Credential not found" },
+        { status: 404 },
+      );
     }
 
     const refreshToken = decrypt(credential.value);
@@ -67,7 +71,8 @@ export async function POST(request: NextRequest) {
           json: { values },
         },
       )
-      .json<{ updates: { updatedRange: string; updatedRows: number } }>();
+      .json<{ updates: { updatedRange: string; updatedRows: number } }>()
+      .catch(parseGoogleApiError);
 
     return NextResponse.json(
       {
@@ -80,9 +85,13 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Google Sheets test append error:", error);
     return NextResponse.json(
-      { error: "Failed to append test row to Google Sheets" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to append test row to Google Sheets",
+      },
       { status: 500 },
     );
   }
 }
-

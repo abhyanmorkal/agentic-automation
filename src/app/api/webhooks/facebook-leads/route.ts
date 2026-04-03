@@ -98,6 +98,13 @@ export async function POST(request: NextRequest) {
         workflowId: payload.workflowId,
         type: NodeType.FACEBOOK_LEAD_TRIGGER,
       },
+      include: {
+        workflow: {
+          select: {
+            userId: true,
+          },
+        },
+      },
     });
 
     if (!triggerNode) {
@@ -116,7 +123,10 @@ export async function POST(request: NextRequest) {
     }
 
     const credential = await prisma.credential.findUnique({
-      where: { id: nodeData.credentialId },
+      where: {
+        id: nodeData.credentialId,
+        userId: triggerNode.workflow.userId,
+      },
     });
 
     if (!credential) {

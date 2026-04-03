@@ -1,6 +1,24 @@
 "use client";
 
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  EyeIcon,
+  EyeOffIcon,
+  HistoryIcon,
+  InfoIcon,
+  KeyIcon,
+  Loader2Icon,
+  RefreshCwIcon,
+  WebhookIcon,
+  ZapIcon,
+} from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,29 +26,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  CopyIcon,
-  CheckIcon,
-  WebhookIcon,
-  InfoIcon,
-  ZapIcon,
-  Loader2Icon,
-  RefreshCwIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  KeyIcon,
-  EyeIcon,
-  EyeOffIcon,
-  HistoryIcon,
-} from "lucide-react";
-import { useParams } from "next/navigation";
-import { toast } from "sonner";
-import { useFormStatus } from "react-dom";
+import { useTriggerToken } from "@/features/triggers/hooks/use-trigger-token";
 
 type WebhookHistoryEntry = {
   receivedAt: string;
@@ -63,18 +62,14 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   nodeId: string;
   defaultValues?: Partial<WebhookTriggerDialogData>;
-  onSavedResponsesChange?: (savedResponses: Record<string, { type: "simple" | "advanced" | "raw"; data: unknown; createdAt: string }>) => void;
+  onSavedResponsesChange?: (
+    savedResponses: Record<
+      string,
+      { type: "simple" | "advanced" | "raw"; data: unknown; createdAt: string }
+    >,
+  ) => void;
   onDescriptionChange?: (description: string) => void;
   onWebhookSecretChange?: (webhookSecret: string) => void;
-}
-
-function encodeToken(workflowId: string, nodeId: string) {
-  const payload = JSON.stringify({ workflowId, nodeId });
-  if (typeof window !== "undefined" && typeof window.btoa === "function") {
-    return window.btoa(encodeURIComponent(payload)) + "_pc";
-  }
-  // Fallback for server-side rendering; this is only used for initial render.
-  return Buffer.from(payload, "utf8").toString("base64") + "_pc";
 }
 
 export const WebhookTriggerDialog = ({
@@ -86,22 +81,35 @@ export const WebhookTriggerDialog = ({
   onDescriptionChange,
   onWebhookSecretChange,
 }: Props) => {
-  const params = useParams();
-  const workflowId = params.workflowId as string;
+  const { workflowId, token, ready } = useTriggerToken(nodeId);
   const [copied, setCopied] = useState(false);
   const [loadingCapture, setLoadingCapture] = useState(false);
-  const [description, setDescription] = useState(defaultValues?.description ?? "");
-  const [testPayload, setTestPayload] = useState('{\n  "email": "test@example.com",\n  "name": "Test User"\n}');
+  const [description, setDescription] = useState(
+    defaultValues?.description ?? "",
+  );
+  const [testPayload, setTestPayload] = useState(
+    '{\n  "email": "test@example.com",\n  "name": "Test User"\n}',
+  );
   const [sendingTest, setSendingTest] = useState(false);
   const [showTestPayload, setShowTestPayload] = useState(false);
-  const [responseFormat, setResponseFormat] = useState<"simple" | "advanced" | "raw">(
-    "simple",
+  const [responseFormat, setResponseFormat] = useState<
+    "simple" | "advanced" | "raw"
+  >("simple");
+  const [sampleSimple, setSampleSimple] = useState<Record<
+    string,
+    unknown
+  > | null>(
+    (defaultValues?.sampleResponseSimple as
+      | Record<string, unknown>
+      | undefined) ?? null,
   );
-  const [sampleSimple, setSampleSimple] = useState<Record<string, unknown> | null>(
-    (defaultValues?.sampleResponseSimple as Record<string, unknown> | undefined) ?? null,
-  );
-  const [sampleAdvanced, setSampleAdvanced] = useState<Record<string, unknown> | null>(
-    (defaultValues?.sampleResponseAdvanced as Record<string, unknown> | undefined) ?? null,
+  const [sampleAdvanced, setSampleAdvanced] = useState<Record<
+    string,
+    unknown
+  > | null>(
+    (defaultValues?.sampleResponseAdvanced as
+      | Record<string, unknown>
+      | undefined) ?? null,
   );
   const [sampleRaw, setSampleRaw] = useState<unknown | null>(
     defaultValues?.sampleResponseRaw ?? null,
@@ -111,18 +119,18 @@ export const WebhookTriggerDialog = ({
   >(defaultValues?.savedResponses);
   const [savingName, setSavingName] = useState<string>("Response A");
   const [saving, setSaving] = useState(false);
-  const [webhookSecret, setWebhookSecret] = useState(defaultValues?.webhookSecret ?? "");
+  const [webhookSecret, setWebhookSecret] = useState(
+    defaultValues?.webhookSecret ?? "",
+  );
   const [secretVisible, setSecretVisible] = useState(false);
-  const webhookHistory = (defaultValues?.webhookHistory ?? []) as WebhookHistoryEntry[];
+  const webhookHistory = (defaultValues?.webhookHistory ??
+    []) as WebhookHistoryEntry[];
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-  const token = useMemo(
-    () => encodeToken(workflowId, nodeId),
-    [workflowId, nodeId],
-  );
-
-  const webhookUrl = `${baseUrl}/workflow/sendwebhookdata/${token}`;
+  const webhookUrl = token
+    ? `${baseUrl}/workflow/sendwebhookdata/${token}`
+    : "";
 
   const copyToClipboard = async (text: string, label = "Webhook URL") => {
     try {
@@ -138,13 +146,18 @@ export const WebhookTriggerDialog = ({
   const generateSecret = () => {
     const arr = new Uint8Array(32);
     window.crypto.getRandomValues(arr);
-    const hex = Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const hex = Array.from(arr)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
     setWebhookSecret(hex);
     onWebhookSecretChange?.(hex);
   };
 
   const handleLoadHistoryEntry = (entry: WebhookHistoryEntry) => {
-    const body = entry.body && typeof entry.body === "object" ? (entry.body as Record<string, unknown>) : {};
+    const body =
+      entry.body && typeof entry.body === "object"
+        ? (entry.body as Record<string, unknown>)
+        : {};
     setSampleSimple(body);
     setSampleAdvanced(body);
     setSampleRaw(entry);
@@ -159,7 +172,9 @@ export const WebhookTriggerDialog = ({
         headers: { "Content-Type": "application/json" },
         body: testPayload,
       });
-      toast.success("Test payload sent. Click 'Load last received' to see the data.");
+      toast.success(
+        "Test payload sent. Click 'Load last received' to see the data.",
+      );
     } catch {
       toast.error("Failed to send test payload.");
     } finally {
@@ -214,6 +229,17 @@ export const WebhookTriggerDialog = ({
     if (responseFormat === "advanced") return sampleAdvanced;
     return sampleRaw;
   }, [responseFormat, sampleSimple, sampleAdvanced, sampleRaw]);
+  const rawResponsePreview = useMemo(() => {
+    if (!sampleRaw || typeof sampleRaw !== "object") {
+      return sampleRaw;
+    }
+
+    if ("body" in sampleRaw) {
+      return (sampleRaw as Record<string, unknown>).body ?? sampleRaw;
+    }
+
+    return sampleRaw;
+  }, [sampleRaw]);
 
   const handleSaveNamedResponse = async () => {
     if (!selectedResponse) {
@@ -240,9 +266,19 @@ export const WebhookTriggerDialog = ({
         return;
       }
 
-      const updated = json.savedResponses as WebhookTriggerDialogData["savedResponses"];
+      const updated =
+        json.savedResponses as WebhookTriggerDialogData["savedResponses"];
       setSavedResponses(updated);
-      onSavedResponsesChange?.(updated as Record<string, { type: "simple" | "advanced" | "raw"; data: unknown; createdAt: string }>);
+      onSavedResponsesChange?.(
+        updated as Record<
+          string,
+          {
+            type: "simple" | "advanced" | "raw";
+            data: unknown;
+            createdAt: string;
+          }
+        >,
+      );
       toast.success(`Saved as ${savingName}. You can use it in next nodes.`);
     } catch {
       toast.error("Failed to save named response.");
@@ -260,7 +296,8 @@ export const WebhookTriggerDialog = ({
             <DialogTitle>Webhook Trigger</DialogTitle>
           </div>
           <DialogDescription>
-            Connect any app that can send an HTTP POST and use the payload in your next nodes.
+            Connect any app that can send an HTTP POST and use the payload in
+            your next nodes.
           </DialogDescription>
         </DialogHeader>
 
@@ -293,6 +330,7 @@ export const WebhookTriggerDialog = ({
                   variant="outline"
                   className="shrink-0 h-9 w-9"
                   onClick={() => copyToClipboard(webhookUrl)}
+                  disabled={!ready}
                 >
                   {copied ? (
                     <CheckIcon className="size-4 text-green-500" />
@@ -302,12 +340,19 @@ export const WebhookTriggerDialog = ({
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Paste this URL into your app&apos;s webhook settings and send a POST request.
+                {ready
+                  ? "Paste this URL into your app's webhook settings and send a POST request."
+                  : "Generating a signed webhook URL..."}
               </p>
             </div>
 
             <div className="space-y-2">
-              <Label>Webhook Secret <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Label>
+                Webhook Secret{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
+              </Label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Input
@@ -325,7 +370,11 @@ export const WebhookTriggerDialog = ({
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     onClick={() => setSecretVisible((v) => !v)}
                   >
-                    {secretVisible ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+                    {secretVisible ? (
+                      <EyeOffIcon className="size-3.5" />
+                    ) : (
+                      <EyeIcon className="size-3.5" />
+                    )}
                   </button>
                 </div>
                 <Button
@@ -341,9 +390,16 @@ export const WebhookTriggerDialog = ({
               </div>
               {webhookSecret && (
                 <div className="rounded-md border bg-muted/40 p-2 text-[11px] text-muted-foreground space-y-1">
-                  <p className="font-medium text-foreground">Required request header:</p>
-                  <code className="block font-mono break-all">X-Webhook-Signature: sha256=&lt;hmac-sha256&gt;</code>
-                  <p>Requests without a valid signature will be rejected with 401.</p>
+                  <p className="font-medium text-foreground">
+                    Required request header:
+                  </p>
+                  <code className="block font-mono break-all">
+                    X-Webhook-Signature: sha256=&lt;hmac-sha256&gt;
+                  </code>
+                  <p>
+                    Requests without a valid signature will be rejected with
+                    401.
+                  </p>
                 </div>
               )}
             </div>
@@ -356,7 +412,10 @@ export const WebhookTriggerDialog = ({
               <ul className="text-xs text-muted-foreground space-y-0.5 list-disc list-inside">
                 <li>Add the URL above in your source app.</li>
                 <li>Send a test POST from your source app.</li>
-                <li>Click <span className="font-medium">Load last received</span> to see the data.</li>
+                <li>
+                  Click <span className="font-medium">Load last received</span>{" "}
+                  to see the data.
+                </li>
               </ul>
             </div>
 
@@ -367,16 +426,18 @@ export const WebhookTriggerDialog = ({
               </div>
               {sampleSimple && Object.keys(sampleSimple).length > 0 ? (
                 <div className="space-y-1 text-[11px] text-muted-foreground">
-                  {Object.entries(sampleSimple).slice(0, 8).map(([key, value]) => (
-                    <div key={key} className="flex items-center gap-2">
-                      <code className="bg-background border px-1.5 py-0.5 rounded font-mono text-[11px] shrink-0">
-                        {`{{webhook.body.${key}}}`}
-                      </code>
-                      <span className="truncate leading-4 text-muted-foreground">
-                        {String(value).slice(0, 40)}
-                      </span>
-                    </div>
-                  ))}
+                  {Object.entries(sampleSimple)
+                    .slice(0, 8)
+                    .map(([key, value]) => (
+                      <div key={key} className="flex items-center gap-2">
+                        <code className="bg-background border px-1.5 py-0.5 rounded font-mono text-[11px] shrink-0">
+                          {`{{webhook.body.${key}}}`}
+                        </code>
+                        <span className="truncate leading-4 text-muted-foreground">
+                          {String(value).slice(0, 40)}
+                        </span>
+                      </div>
+                    ))}
                   {Object.keys(sampleSimple).length > 8 && (
                     <p className="text-[11px] text-muted-foreground pt-0.5">
                       +{Object.keys(sampleSimple).length - 8} more fields
@@ -385,7 +446,10 @@ export const WebhookTriggerDialog = ({
                 </div>
               ) : (
                 <div className="space-y-1 text-[11px] text-muted-foreground">
-                  <p className="text-muted-foreground">Load a webhook response above to see your actual fields here.</p>
+                  <p className="text-muted-foreground">
+                    Load a webhook response above to see your actual fields
+                    here.
+                  </p>
                   <div className="flex items-start gap-2 opacity-50">
                     <code className="bg-background border px-1.5 py-0.5 rounded font-mono text-[11px]">
                       {"{{webhook.body.email}}"}
@@ -403,7 +467,11 @@ export const WebhookTriggerDialog = ({
                 onClick={() => setShowTestPayload((v) => !v)}
               >
                 Send test payload
-                {showTestPayload ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
+                {showTestPayload ? (
+                  <ChevronDownIcon className="size-3.5" />
+                ) : (
+                  <ChevronRightIcon className="size-3.5" />
+                )}
               </button>
               {showTestPayload && (
                 <div className="px-3 pb-3 space-y-2">
@@ -419,9 +487,11 @@ export const WebhookTriggerDialog = ({
                     variant="outline"
                     className="w-full h-7 text-xs gap-1.5"
                     onClick={handleSendTestPayload}
-                    disabled={sendingTest}
+                    disabled={sendingTest || !ready}
                   >
-                    {sendingTest ? <Loader2Icon className="size-3 animate-spin" /> : null}
+                    {sendingTest ? (
+                      <Loader2Icon className="size-3 animate-spin" />
+                    ) : null}
                     {sendingTest ? "Sending…" : "Send POST to webhook URL"}
                   </Button>
                 </div>
@@ -444,7 +514,11 @@ export const WebhookTriggerDialog = ({
                   "Make.com",
                   "Postman",
                 ].map((svc) => (
-                  <Badge key={svc} variant="secondary" className="text-xs font-normal">
+                  <Badge
+                    key={svc}
+                    variant="secondary"
+                    className="text-xs font-normal"
+                  >
                     {svc}
                   </Badge>
                 ))}
@@ -460,7 +534,10 @@ export const WebhookTriggerDialog = ({
                 </span>
                 {defaultValues?.lastSampleCapturedAt && (
                   <span className="text-[11px] text-muted-foreground">
-                    Last received: {new Date(defaultValues.lastSampleCapturedAt).toLocaleString()}
+                    Last received:{" "}
+                    {new Date(
+                      defaultValues.lastSampleCapturedAt,
+                    ).toLocaleString()}
                   </span>
                 )}
               </div>
@@ -484,7 +561,10 @@ export const WebhookTriggerDialog = ({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={loadingCapture || (!sampleSimple && !sampleAdvanced && !sampleRaw)}
+                  disabled={
+                    loadingCapture ||
+                    (!sampleSimple && !sampleAdvanced && !sampleRaw)
+                  }
                   onClick={() => handleCaptureSample({ recapture: true })}
                   className="gap-1.5 h-7 text-xs"
                 >
@@ -502,7 +582,7 @@ export const WebhookTriggerDialog = ({
                 <div className="space-y-0.5 max-h-28 overflow-y-auto">
                   {webhookHistory.map((entry, i) => (
                     <button
-                      key={i}
+                      key={`${entry.receivedAt}-${entry.method ?? "unknown"}`}
                       type="button"
                       className="w-full text-left px-1.5 py-0.5 rounded text-[11px] font-mono text-muted-foreground hover:bg-background hover:text-foreground transition-colors"
                       onClick={() => handleLoadHistoryEntry(entry)}
@@ -575,7 +655,8 @@ export const WebhookTriggerDialog = ({
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      No fields found yet. Capture a response first to see label/value pairs.
+                      No fields found yet. Capture a response first to see
+                      label/value pairs.
                     </p>
                   )}
                 </div>
@@ -599,12 +680,8 @@ export const WebhookTriggerDialog = ({
                   readOnly
                   className="h-52 font-mono text-xs resize-none whitespace-pre"
                   value={
-                    sampleRaw
-                      ? JSON.stringify(
-                          (sampleRaw as any)?.body ?? sampleRaw,
-                          null,
-                          2,
-                        )
+                    rawResponsePreview
+                      ? JSON.stringify(rawResponsePreview, null, 2)
                       : ""
                   }
                   placeholder='// No webhook received yet. Send a POST to the URL above, then click "Load last received".'
@@ -614,7 +691,9 @@ export const WebhookTriggerDialog = ({
 
             <div className="space-y-2 pt-2 border-t mt-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">Save current sample as</span>
+                <span className="text-xs text-muted-foreground">
+                  Save current sample as
+                </span>
                 <div className="flex items-center gap-2">
                   <Input
                     className="h-7 text-xs w-36"
@@ -640,8 +719,8 @@ export const WebhookTriggerDialog = ({
                     Saved responses can be used in next nodes as{" "}
                     <code className="bg-background border px-1 rounded font-mono text-[11px]">
                       {`{{webhook.savedResponses['${Object.keys(savedResponses)[0]}']}}`}
-                    </code>.
-                    Click a name to overwrite it.
+                    </code>
+                    . Click a name to overwrite it.
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {Object.keys(savedResponses).map((name) => (

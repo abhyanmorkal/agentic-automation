@@ -84,6 +84,19 @@ const formSchema = z.object({
 
 export type GoogleSheetsFormValues = z.infer<typeof formSchema>;
 
+const toTemplatePath = (root: string, fieldPath: string) => {
+  const segments = fieldPath.split(".").filter(Boolean);
+  const suffix = segments
+    .map((segment) =>
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment)
+        ? `.${segment}`
+        : `.[${segment}]`,
+    )
+    .join("");
+
+  return `${root}${suffix}`;
+};
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -92,6 +105,10 @@ interface Props {
   availableVariables?: VariableTree;
   upstreamSources?: UpstreamSource[];
   savedResponseFields?: { key: string; label: string; example?: string }[];
+  savedResponseFieldsByName?: Record<
+    string,
+    { key: string; label: string; example?: string }[]
+  >;
   activeResponseName?: string;
   allResponseNames?: string[];
 }
@@ -103,6 +120,7 @@ export const GoogleSheetsDialog = ({
   defaultValues = {},
   upstreamSources = [],
   savedResponseFields = [],
+  savedResponseFieldsByName = {},
   activeResponseName,
   allResponseNames = [],
 }: Props) => {
@@ -256,6 +274,14 @@ export const GoogleSheetsDialog = ({
   const watchedCredentialId = form.watch("credentialId");
   const watchedSpreadsheetId = form.watch("spreadsheetId");
   const watchedSheetTitle = form.watch("sheetTitle");
+  const watchedSelectedResponseName = form.watch("selectedResponseName");
+  const effectiveResponseName =
+    watchedSelectedResponseName ||
+    activeResponseName ||
+    allResponseNames[0] ||
+    "";
+  const currentSavedResponseFields =
+    savedResponseFieldsByName[effectiveResponseName] ?? savedResponseFields;
 
   // Load spreadsheets when credential changes
   useEffect(() => {
@@ -367,7 +393,7 @@ export const GoogleSheetsDialog = ({
       values.action === "append" &&
       columns.length > 0 &&
       Object.keys(submittedMappings).length > 0 &&
-      savedResponseFields.length > 0
+      currentSavedResponseFields.length > 0
     ) {
       const sourceKey = values.sourceVariable || "webhook";
       const row = columns.map((col) => {
@@ -376,9 +402,9 @@ export const GoogleSheetsDialog = ({
         // Build a Handlebars template that references the LIVE incoming data,
         // NOT the saved design-time sample.
         if (sourceKey === "facebookLead") {
-          return `{{${sourceKey}.fields.[${key}]}}`;
+          return `{{${toTemplatePath(`${sourceKey}.fields`, key)}}}`;
         }
-        return `{{${sourceKey}.body.[${key}]}}`;
+        return `{{${toTemplatePath(`${sourceKey}.body`, key)}}}`;
       });
       finalValues = JSON.stringify([row]);
     }
@@ -416,7 +442,9 @@ export const GoogleSheetsDialog = ({
       const row = columns.map((col) => {
         const fieldKey = currentMappings[col];
         if (!fieldKey) return "";
-        const field = savedResponseFields.find((f) => f.key === fieldKey);
+        const field = currentSavedResponseFields.find(
+          (f) => f.key === fieldKey,
+        );
         return field?.example ?? fieldKey;
       });
       testValues = [row];
@@ -460,7 +488,7 @@ export const GoogleSheetsDialog = ({
   };
 
   const hasSavedResponseFields =
-    savedResponseFields.length > 0 && !!activeResponseName;
+    currentSavedResponseFields.length > 0 && !!effectiveResponseName;
   return (
     <>
       <AlertDialog
@@ -882,7 +910,7 @@ export const GoogleSheetsDialog = ({
                                         />
                                       </SelectTrigger>
                                       <SelectContent>
-                                        {savedResponseFields.map((f) => (
+                                        {currentSavedResponseFields.map((f) => (
                                           <SelectItem key={f.key} value={f.key}>
                                             {f.label}
                                             {f.example ? ` — ${f.example}` : ""}

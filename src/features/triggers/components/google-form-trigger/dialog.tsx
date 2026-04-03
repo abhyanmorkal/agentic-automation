@@ -1,7 +1,6 @@
 "use client";
 
 import { CopyIcon } from "lucide-react";
-import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { encodeTriggerToken } from "@/lib/trigger-token";
+import { useTriggerToken } from "@/features/triggers/hooks/use-trigger-token";
 import { generateGoogleFormScript } from "./utils";
 
 interface Props {
@@ -27,13 +26,13 @@ export const GoogleFormTriggerDialog = ({
   onOpenChange,
   nodeId,
 }: Props) => {
-  const params = useParams();
-  const workflowId = params.workflowId as string;
-  const token = encodeTriggerToken({ workflowId, nodeId });
+  const { token, ready } = useTriggerToken(nodeId);
 
   // Construct the webhook URL
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const webhookUrl = `${baseUrl}/api/webhooks/google-form?token=${token}`;
+  const webhookUrl = token
+    ? `${baseUrl}/api/webhooks/google-form?token=${token}`
+    : "";
 
   const copyToClipboard = async () => {
     try {
@@ -69,10 +68,16 @@ export const GoogleFormTriggerDialog = ({
                 size="icon"
                 variant="outline"
                 onClick={copyToClipboard}
+                disabled={!ready}
               >
                 <CopyIcon className="size-4" />
               </Button>
             </div>
+            {!ready && (
+              <p className="text-xs text-muted-foreground">
+                Generating a signed webhook URL...
+              </p>
+            )}
           </div>
 
           <div className="rounded-lg bg-muted p-4 space-y-2">
@@ -93,6 +98,7 @@ export const GoogleFormTriggerDialog = ({
               type="button"
               variant="outline"
               onClick={async () => {
+                if (!ready) return;
                 const script = generateGoogleFormScript(webhookUrl);
                 try {
                   await navigator.clipboard.writeText(script);
@@ -101,6 +107,7 @@ export const GoogleFormTriggerDialog = ({
                   toast.error("Failed to copy Script to clipboard");
                 }
               }}
+              disabled={!ready}
             >
               <CopyIcon className="size-4 mr-2" />
               Copy Google Apps Script

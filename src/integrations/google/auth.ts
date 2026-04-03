@@ -1,4 +1,4 @@
-import ky from "ky";
+import ky, { HTTPError } from "ky";
 import type { StepTools } from "@/features/executions/types";
 import { CredentialType } from "@/generated/prisma";
 import {
@@ -43,4 +43,23 @@ export const getGoogleAccessToken = async (refreshToken: string) => {
     .json<{ access_token: string }>();
 
   return response.access_token;
+};
+
+export const parseGoogleApiError = async (error: unknown): Promise<never> => {
+  if (error instanceof HTTPError) {
+    const body = (await error.response.json().catch(() => ({}))) as {
+      error?: {
+        code?: number;
+        message?: string;
+        status?: string;
+      };
+    };
+
+    const status = body.error?.code ?? error.response.status;
+    const message = body.error?.message ?? "Google API request failed";
+
+    throw new Error(`Google API error (${status}): ${message}`);
+  }
+
+  throw error;
 };

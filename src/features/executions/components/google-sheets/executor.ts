@@ -7,6 +7,7 @@ import { googleSheetsChannel } from "@/inngest/channels/google-sheets";
 import {
   getGoogleAccessToken,
   loadGoogleRefreshToken,
+  parseGoogleApiError,
 } from "@/integrations/google/auth";
 
 Handlebars.registerHelper("json", (context) => {
@@ -185,7 +186,8 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
             `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
             { headers: { Authorization: `Bearer ${accessToken}` } },
           )
-          .json<{ values: string[][] }>();
+          .json<{ values: string[][] }>()
+          .catch(parseGoogleApiError);
 
         const rows = response.values ?? [];
         const headers = rows[0] ?? [];
@@ -270,7 +272,8 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
             json: { values: parsedValues },
           },
         )
-        .json<{ updates: { updatedRange: string; updatedRows: number } }>();
+        .json<{ updates: { updatedRange: string; updatedRows: number } }>()
+        .catch(parseGoogleApiError);
 
       return {
         ...context,

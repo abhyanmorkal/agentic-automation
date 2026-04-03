@@ -387,10 +387,10 @@ This is the literal checklist to complete before inviting beta users.
 
 ### Security
 
-- [ ] Re-test OAuth hardening
-- [ ] Re-test webhook verification
-- [ ] Re-test credential ownership checks
-- [ ] Verify no unsafe execution path remains exposed
+- [x] Re-test OAuth hardening
+- [x] Re-test webhook verification
+- [x] Re-test credential ownership checks
+- [x] Verify no unsafe execution path remains exposed
 
 ### UX
 

@@ -225,7 +225,7 @@ export const validateWorkflowDraft = ({
 }) => {
   const issues: WorkflowValidationIssue[] = [];
   const nodeIds = new Set<string>();
-  const initialNodes: DraftNode[] = [];
+  const entryNodes: DraftNode[] = [];
   const variableNames = new Map<string, string>();
 
   for (const node of nodes) {
@@ -255,8 +255,8 @@ export const validateWorkflowDraft = ({
       continue;
     }
 
-    if (nodeType === NodeType.INITIAL) {
-      initialNodes.push(node);
+    if (nodeType === NodeType.INITIAL || TRIGGER_NODE_TYPES.has(nodeType)) {
+      entryNodes.push(node);
     }
 
     const data = getNodeData(node);
@@ -309,8 +309,12 @@ export const validateWorkflowDraft = ({
     }
   }
 
-  if (initialNodes.length !== 1) {
-    issues.push(createIssue("Workflow must contain exactly one initial node"));
+  if (entryNodes.length !== 1) {
+    issues.push(
+      createIssue(
+        "Workflow must contain exactly one entry node (trigger or initial node)",
+      ),
+    );
   }
 
   const edgeKeys = new Set<string>();
