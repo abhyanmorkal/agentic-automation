@@ -3,12 +3,16 @@
 import { formatDistanceToNow } from "date-fns";
 import {
   CheckCircle2Icon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   ClockIcon,
+  CopyIcon,
   Loader2Icon,
   XCircleIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -40,6 +44,59 @@ const getStatusIcon = (status: ExecutionStatus) => {
 
 const formatStatus = (status: ExecutionStatus) => {
   return status.charAt(0) + status.slice(1).toLowerCase();
+};
+
+const JsonBlock = ({
+  label,
+  value,
+  defaultOpen = false,
+}: {
+  label: string;
+  value: unknown;
+  defaultOpen?: boolean;
+}) => {
+  const [open, setOpen] = useState(defaultOpen);
+  const json = JSON.stringify(value, null, 2);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          className="flex items-center gap-1 text-xs font-medium text-muted-foreground"
+          onClick={() => setOpen((current) => !current)}
+        >
+          {open ? (
+            <ChevronDownIcon className="size-3.5" />
+          ) : (
+            <ChevronRightIcon className="size-3.5" />
+          )}
+          {label}
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(json);
+            } catch {
+              // Ignore clipboard errors in read-only debug UI.
+            }
+          }}
+        >
+          <CopyIcon className="mr-1 size-3.5" />
+          Copy
+        </Button>
+      </div>
+      {open && (
+        <pre className="max-h-72 overflow-auto rounded bg-muted p-3 text-xs font-mono">
+          {json}
+        </pre>
+      )}
+    </div>
+  );
 };
 
 export const ExecutionView = ({ executionId }: { executionId: string }) => {
@@ -123,6 +180,38 @@ export const ExecutionView = ({ executionId }: { executionId: string }) => {
             <p className="text-sm">{execution.inngestEventId}</p>
           </div>
         </div>
+        {execution.nodeExecutions.length > 0 && (
+          <div className="rounded-md border bg-muted/30 p-4">
+            <p className="text-sm font-medium">Debug summary</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Badge variant="secondary">
+                {execution.nodeExecutions.length} node
+                {execution.nodeExecutions.length === 1 ? "" : "s"}
+              </Badge>
+              <Badge variant="secondary">
+                {
+                  execution.nodeExecutions.filter(
+                    (nodeExecution) =>
+                      nodeExecution.status === ExecutionStatus.SUCCESS,
+                  ).length
+                }{" "}
+                succeeded
+              </Badge>
+              <Badge variant="secondary">
+                {
+                  execution.nodeExecutions.filter(
+                    (nodeExecution) =>
+                      nodeExecution.status === ExecutionStatus.FAILED,
+                  ).length
+                }{" "}
+                failed
+              </Badge>
+              {duration !== null ? (
+                <Badge variant="secondary">Total {duration}s</Badge>
+              ) : null}
+            </div>
+          </div>
+        )}
         {execution.error && (
           <div className="mt-6 p-4 bg-red-50 rounded-md space-y-3">
             <div>
@@ -158,10 +247,7 @@ export const ExecutionView = ({ executionId }: { executionId: string }) => {
 
         {execution.output && (
           <div className="mt-6 p-4 bg-muted rounded-md">
-            <p className="text-sm font-medium mb-2">Output</p>
-            <pre className="text-xs font-mono overflow-auto">
-              {JSON.stringify(execution.output, null, 2)}
-            </pre>
+            <JsonBlock label="Workflow output" value={execution.output} />
           </div>
         )}
 
@@ -203,6 +289,7 @@ export const ExecutionView = ({ executionId }: { executionId: string }) => {
                       <div className="text-right text-xs text-muted-foreground">
                         <p>{formatStatus(nodeExecution.status)}</p>
                         {nodeDuration !== null ? <p>{nodeDuration}s</p> : null}
+                        <p>Step {nodeExecution.orderIndex + 1}</p>
                       </div>
                     </div>
 
@@ -218,22 +305,20 @@ export const ExecutionView = ({ executionId }: { executionId: string }) => {
                     )}
 
                     <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Input
-                        </p>
-                        <pre className="max-h-72 overflow-auto rounded bg-muted p-3 text-xs font-mono">
-                          {JSON.stringify(nodeExecution.input, null, 2)}
-                        </pre>
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Output
-                        </p>
-                        <pre className="max-h-72 overflow-auto rounded bg-muted p-3 text-xs font-mono">
-                          {JSON.stringify(nodeExecution.output, null, 2)}
-                        </pre>
-                      </div>
+                      <JsonBlock
+                        label="Input"
+                        value={nodeExecution.input}
+                        defaultOpen={
+                          nodeExecution.status === ExecutionStatus.FAILED
+                        }
+                      />
+                      <JsonBlock
+                        label="Output"
+                        value={nodeExecution.output}
+                        defaultOpen={
+                          nodeExecution.status === ExecutionStatus.FAILED
+                        }
+                      />
                     </div>
                   </div>
                 );

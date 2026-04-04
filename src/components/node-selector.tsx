@@ -55,6 +55,7 @@ export type NodeTypeOption = {
   label: string;
   description: string;
   icon: React.ComponentType<{ className?: string; size?: number }> | string;
+  stage?: "beta" | "coming-soon";
 };
 
 const triggerNodes: NodeTypeOption[] = [
@@ -79,6 +80,7 @@ const triggerNodes: NodeTypeOption[] = [
   },
   {
     type: NodeType.WEBHOOK_TRIGGER,
+    stage: "beta",
     label: "Webhook",
     description:
       "Runs the flow when any HTTP POST is received — works with Razorpay, Typeform, Shopify, and more",
@@ -93,6 +95,7 @@ const triggerNodes: NodeTypeOption[] = [
   },
   {
     type: NodeType.FACEBOOK_LEAD_TRIGGER,
+    stage: "beta",
     label: "Facebook Lead Ads",
     description:
       "Runs the flow when a new lead is submitted via a Facebook Lead Ads form",
@@ -170,6 +173,7 @@ const googleNodes: NodeTypeOption[] = [
   },
   {
     type: NodeType.GOOGLE_SHEETS,
+    stage: "beta",
     label: "Google Sheets",
     description: "Append rows or read data from a Google Spreadsheet",
     icon: "/logos/googlesheets.svg",
@@ -232,6 +236,7 @@ const utilityNodes: NodeTypeOption[] = [
 const controlFlowNodes: NodeTypeOption[] = [
   {
     type: NodeType.IF,
+    stage: "beta",
     label: "IF",
     description:
       "Route the workflow through true or false branches based on a condition",
@@ -239,6 +244,7 @@ const controlFlowNodes: NodeTypeOption[] = [
   },
   {
     type: NodeType.DELAY,
+    stage: "beta",
     label: "Delay",
     description:
       "Pause the workflow for a set number of seconds, minutes, or hours",
@@ -246,6 +252,7 @@ const controlFlowNodes: NodeTypeOption[] = [
   },
   {
     type: NodeType.SWITCH,
+    stage: "beta",
     label: "Switch",
     description:
       "Route the workflow to one of several exact-match cases, with a default fallback",
@@ -253,6 +260,7 @@ const controlFlowNodes: NodeTypeOption[] = [
   },
   {
     type: NodeType.MERGE,
+    stage: "beta",
     label: "Merge",
     description: "Join active paths back into a single downstream path",
     icon: GitMergeIcon,
@@ -315,13 +323,30 @@ function NodeItem({
           <Icon size={20} className="flex-shrink-0 text-muted-foreground" />
         )}
         <div className="flex flex-col items-start text-left min-w-0">
-          <span className="font-medium text-sm">{nodeType.label}</span>
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-sm">{nodeType.label}</span>
+            {nodeType.stage === "beta" && (
+              <span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                Beta
+              </span>
+            )}
+            {!enabled && (
+              <span className="rounded border border-muted-foreground/20 bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Coming Soon
+              </span>
+            )}
+          </div>
           <span className="text-xs text-muted-foreground line-clamp-2">
             {nodeType.description}
           </span>
+          {nodeType.stage === "beta" && (
+            <span className="text-[10px] text-amber-700/80 mt-0.5">
+              Supported for closed beta, but still under active refinement.
+            </span>
+          )}
           {!enabled && (
             <span className="text-[10px] text-muted-foreground/80 mt-0.5">
-              Coming soon
+              Not yet available in the current beta scope.
             </span>
           )}
         </div>

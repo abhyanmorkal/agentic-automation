@@ -1,5 +1,11 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import z from "zod";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -26,25 +32,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import z from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
-import { useEffect } from "react";
-import { Button } from "@/components/ui/button";
+import type { UpstreamReference } from "../../lib/upstream-references";
+import { ReferencePicker } from "../reference-picker";
 
 const formSchema = z.object({
   variableName: z
     .string()
     .min(1, { message: "Variable name is required" })
-    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, { 
-      message: "Variable name must start with a letter or underscore and container only letters, numbers, and underscores",
+    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
+      message:
+        "Variable name must start with a letter or underscore and container only letters, numbers, and underscores",
     }),
-  endpoint: z.string()
-    .min(1, { message: "Please enter a valid URL" }),
+  endpoint: z.string().min(1, { message: "Please enter a valid URL" }),
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
-  body: z
-    .string()
-    .optional()
+  body: z.string().optional(),
 });
 
 export type HttpRequestFormValues = z.infer<typeof formSchema>;
@@ -54,13 +55,15 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: z.infer<typeof formSchema>) => void;
   defaultValues?: Partial<HttpRequestFormValues>;
-};
+  upstreamReferences?: UpstreamReference[];
+}
 
 export const HttpRequestDialog = ({
   open,
   onOpenChange,
   onSubmit,
   defaultValues = {},
+  upstreamReferences = [],
 }: Props) => {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -87,6 +90,15 @@ export const HttpRequestDialog = ({
   const watchVariableName = form.watch("variableName") || "myApiCall";
   const watchMethod = form.watch("method");
   const showBodyField = ["POST", "PUT", "PATCH"].includes(watchMethod);
+  const insertIntoField = (
+    fieldName: "endpoint" | "body",
+    template: string,
+  ) => {
+    const currentValue = form.getValues(fieldName) ?? "";
+    form.setValue(fieldName, `${currentValue}${template}`, {
+      shouldDirty: true,
+    });
+  };
 
   const handleSubmit = (values: z.infer<typeof formSchema>) => {
     onSubmit(values);
@@ -104,7 +116,11 @@ export const HttpRequestDialog = ({
         </DialogHeader>
         <Form {...form}>
           <form
-            onSubmit={form.handleSubmit(handleSubmit)}
+            onSubmit={form.handleSubmit(handleSubmit, () => {
+              toast.error(
+                "Please fix the highlighted fields before saving this HTTP Request node.",
+              );
+            })}
             className="space-y-8 mt-4"
           >
             <FormField
@@ -114,10 +130,7 @@ export const HttpRequestDialog = ({
                 <FormItem>
                   <FormLabel>Variable Name</FormLabel>
                   <FormControl>
-                    <Input
-                      placeholder="myApiCall"
-                      {...field}
-                    />
+                    <Input placeholder="myApiCall" {...field} />
                   </FormControl>
                   <FormDescription>
                     Use this name to reference the result in other nodes:{" "}
@@ -162,7 +175,15 @@ export const HttpRequestDialog = ({
               name="endpoint"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Endpoint URL</FormLabel>
+                  <div className="flex items-center justify-between gap-2">
+                    <FormLabel>Endpoint URL</FormLabel>
+                    <ReferencePicker
+                      references={upstreamReferences}
+                      onInsert={(template) =>
+                        insertIntoField("endpoint", template)
+                      }
+                    />
+                  </div>
                   <FormControl>
                     <Input
                       placeholder="https://api.example.com/users/{{httpResponse.data.id}}"
@@ -170,7 +191,8 @@ export const HttpRequestDialog = ({
                     />
                   </FormControl>
                   <FormDescription>
-                    Static URL or use {"{{variables}}"} for simple values or {"{{json variable}}"} to stringify objects
+                    Static URL or use {"{{variables}}"} for simple values or{" "}
+                    {"{{json variable}}"} to stringify objects
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -181,23 +203,33 @@ export const HttpRequestDialog = ({
                 control={form.control}
                 name="body"
                 render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Request Body</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder={
-                        '{\n  "userId": "{{httpResponse.data.id}}",\n  "name": "{{httpResponse.data.name}}",\n  "items": "{{httpResponse.data.items}}"\n}'
-                      }
-                      className="min-h-[120px] font-mono text-sm"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    JSON with template variables. Use {"{{variables}}"} for simple values or {"{{json variable}}"} to stringify objects
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
+                  <FormItem>
+                    <div className="flex items-center justify-between gap-2">
+                      <FormLabel>Request Body</FormLabel>
+                      <ReferencePicker
+                        references={upstreamReferences}
+                        onInsert={(template) =>
+                          insertIntoField("body", template)
+                        }
+                      />
+                    </div>
+                    <FormControl>
+                      <Textarea
+                        placeholder={
+                          '{\n  "userId": "{{httpResponse.data.id}}",\n  "name": "{{httpResponse.data.name}}",\n  "items": "{{httpResponse.data.items}}"\n}'
+                        }
+                        className="min-h-[120px] font-mono text-sm"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      JSON with template variables. Use {"{{variables}}"} for
+                      simple values or {"{{json variable}}"} to stringify
+                      objects
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
             )}
             <DialogFooter className="mt-4">

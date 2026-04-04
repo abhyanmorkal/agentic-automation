@@ -394,10 +394,10 @@ This is the literal checklist to complete before inviting beta users.
 
 ### UX
 
-- [ ] Improve reference picker coverage
-- [ ] Confirm validation errors are understandable
-- [ ] Confirm execution detail is usable for debugging
-- [ ] Hide or label unsupported/unfinished nodes clearly
+- [x] Improve reference picker coverage
+- [x] Confirm validation errors are understandable
+- [x] Confirm execution detail is usable for debugging
+- [x] Hide or label unsupported/unfinished nodes clearly
 
 ### Connectors
 

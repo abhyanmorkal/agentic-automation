@@ -1,6 +1,10 @@
-import { useTRPC } from "@/trpc/client"
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useTRPC } from "@/trpc/client";
 import { useWorkflowsParams } from "./use-workflows-params";
 
 /**
@@ -9,7 +13,7 @@ import { useWorkflowsParams } from "./use-workflows-params";
 export const useSuspenseWorkflows = () => {
   const trpc = useTRPC();
   const [params] = useWorkflowsParams();
-  
+
   return useSuspenseQuery(trpc.workflows.getMany.queryOptions(params));
 };
 
@@ -24,9 +28,7 @@ export const useCreateWorkflow = () => {
     trpc.workflows.create.mutationOptions({
       onSuccess: (data) => {
         toast.success(`Workflow "${data.name}" created`);
-        queryClient.invalidateQueries(
-          trpc.workflows.getMany.queryOptions({}),
-        );
+        queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
       },
       onError: (error) => {
         toast.error(`Failed to create workflow: ${error.message}`);
@@ -50,10 +52,10 @@ export const useRemoveWorkflow = () => {
         queryClient.invalidateQueries(
           trpc.workflows.getOne.queryFilter({ id: data.id }),
         );
-      }
-    })
-  )
-}
+      },
+    }),
+  );
+};
 
 /**
  * Hook to fetch a single workflow using suspense
@@ -74,9 +76,7 @@ export const useUpdateWorkflowName = () => {
     trpc.workflows.updateName.mutationOptions({
       onSuccess: (data) => {
         toast.success(`Workflow "${data.name}" updated`);
-        queryClient.invalidateQueries(
-          trpc.workflows.getMany.queryOptions({}),
-        );
+        queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
         queryClient.invalidateQueries(
           trpc.workflows.getOne.queryOptions({ id: data.id }),
         );
@@ -99,15 +99,13 @@ export const useUpdateWorkflow = () => {
     trpc.workflows.update.mutationOptions({
       onSuccess: (data) => {
         toast.success(`Workflow "${data.name}" saved`);
-        queryClient.invalidateQueries(
-          trpc.workflows.getMany.queryOptions({}),
-        );
+        queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
         queryClient.invalidateQueries(
           trpc.workflows.getOne.queryOptions({ id: data.id }),
         );
       },
       onError: (error) => {
-        toast.error(`Failed to save workflow: ${error.message}`);
+        toast.error(error.message);
       },
     }),
   );
@@ -123,7 +121,9 @@ export const useToggleWorkflow = () => {
   return useMutation(
     trpc.workflows.toggle.mutationOptions({
       onSuccess: (data) => {
-        toast.success(`Workflow "${data.name}" ${data.isActive ? "activated" : "paused"}`);
+        toast.success(
+          `Workflow "${data.name}" ${data.isActive ? "activated" : "paused"}`,
+        );
         queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
         queryClient.invalidateQueries(
           trpc.workflows.getOne.queryOptions({ id: data.id }),
@@ -148,7 +148,7 @@ export const useExecuteWorkflow = () => {
         toast.success(`Workflow "${data.name}" executed`);
       },
       onError: (error) => {
-        toast.error(`Failed to execute workflow: ${error.message}`);
+        toast.error(error.message);
       },
     }),
   );
