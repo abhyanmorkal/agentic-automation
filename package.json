@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "prisma generate && next build --turbopack",
     "start": "next start",
     "test": "tsx --test src/inngest/execution-scheduler.test.ts src/lib/oauth-state.test.ts src/lib/trigger-token.test.ts src/lib/webhook-security.test.ts src/features/triggers/components/webhook-trigger/formatters.test.ts",
     "lint": "biome check",
