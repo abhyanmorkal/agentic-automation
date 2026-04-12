@@ -74,16 +74,27 @@ import {
 } from "./actions";
 import type { UpstreamSource } from "./types";
 
+/**
+ * Sanitize a raw string into a valid JS identifier:
+ * replace spaces/invalid chars with underscores, prefix leading digits with _.
+ */
+function sanitizeVariableName(raw: string): string {
+  if (!raw) return "";
+  let result = raw.replace(/[^A-Za-z0-9_$]/g, "_");
+  if (/^[0-9]/.test(result)) result = "_" + result;
+  return result;
+}
+
 const formSchema = z.object({
   variableName: z
     .string()
     .min(1, "Variable name is required")
-    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, "Variable name must start with a letter, _ or $ and contain only letters, digits, _ or $"),
   credentialId: z.string().min(1, "Credential is required"),
   spreadsheetId: z.string().min(1, "Spreadsheet is required"),
   sheetTitle: z.string().min(1, "Sheet is required"),
   range: z.string().min(1, "Range is required"),
-  action: z.enum(["append", "read"]),
+  action: z.enum(["append", "read", "update", "delete", "clear", "create_sheet"]),
   values: z.string().optional(),
   columnMappings: z.record(z.string(), z.string().optional()).optional(),
   sourceVariable: z.string().min(1, "Source variable is required"),
@@ -95,6 +106,9 @@ const formSchema = z.object({
       value: z.string().optional(),
     })
     .optional(),
+  updateRowNumber: z.string().optional(),
+  deleteRowNumber: z.string().optional(),
+  newSheetName: z.string().optional(),
   readOutputMapping: z.record(z.string(), z.string()).optional(),
 });
 
@@ -250,6 +264,9 @@ export const GoogleSheetsDialog = ({
         operator: "equals",
         value: "",
       },
+      updateRowNumber: defaultValues.updateRowNumber ?? "",
+      deleteRowNumber: defaultValues.deleteRowNumber ?? "",
+      newSheetName: defaultValues.newSheetName ?? "",
       readOutputMapping: defaultValues.readOutputMapping ?? {},
     },
   });
@@ -274,6 +291,9 @@ export const GoogleSheetsDialog = ({
           operator: "equals",
           value: "",
         },
+        updateRowNumber: defaultValues.updateRowNumber ?? "",
+        deleteRowNumber: defaultValues.deleteRowNumber ?? "",
+        newSheetName: defaultValues.newSheetName ?? "",
         readOutputMapping: defaultValues.readOutputMapping ?? {},
       });
   }, [open, defaultValues, form, upstreamSources]);
@@ -673,8 +693,19 @@ export const GoogleSheetsDialog = ({
                       <FormItem>
                         <FormLabel>Variable Name</FormLabel>
                         <FormControl>
-                          <Input placeholder="mySheets" {...field} />
+                          <Input
+                            placeholder="mySheets"
+                            {...field}
+                            onChange={(e) => {
+                              field.onChange(sanitizeVariableName(e.target.value));
+                            }}
+                          />
                         </FormControl>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Output reference:{" "}
+                          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{`{{${varName || "mySheets"}}}`}</code>
+                          . Spaces &amp; special characters are auto-replaced with underscores.
+                        </span>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -742,8 +773,12 @@ export const GoogleSheetsDialog = ({
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="append">Add New Row</SelectItem>
-                            <SelectItem value="read">Get Row(s)</SelectItem>
+                            <SelectItem value="append">➕ Add New Row</SelectItem>
+                            <SelectItem value="read">🔎 Get Row(s)</SelectItem>
+                            <SelectItem value="update">✏️ Update Row</SelectItem>
+                            <SelectItem value="delete">🗑️ Delete Row</SelectItem>
+                            <SelectItem value="clear">🧹 Clear Range</SelectItem>
+                            <SelectItem value="create_sheet">📋 Create Sheet Tab</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -1057,6 +1092,141 @@ export const GoogleSheetsDialog = ({
                     </div>
                   )}
 
+                  {/* ── Update Row ── */}
+                  {action === "update" && (
+                    <div className="space-y-4">
+                      <FormField
+                        control={form.control}
+                        name="updateRowNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Row Number to Update</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="2  (row 1 is the header)"
+                                {...field}
+                                className="text-sm"
+                              />
+                            </FormControl>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              Row&nbsp;1 is typically the header row. You can also use a template like{" "}
+                              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{`{{webhook.body.rowNumber}}`}</code>.
+                            </span>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <FormLabel>Column values to update</FormLabel>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            disabled={loadingColumns || !watchedSheetTitle}
+                            onClick={handleRefreshColumns}
+                            title="Refresh Columns"
+                          >
+                            <RefreshCwIcon className={`h-3 w-3 ${loadingColumns ? "animate-spin" : ""}`} />
+                            <span className="sr-only">Refresh Columns</span>
+                          </Button>
+                        </div>
+                        <div className="border rounded-md p-3 max-h-60 overflow-auto space-y-2 bg-muted/40">
+                          {loadingColumns && <p className="text-xs text-muted-foreground">Loading columns...</p>}
+                          {!loadingColumns && columns.length === 0 && (
+                            <p className="text-xs text-muted-foreground">Select a spreadsheet and sheet to load column headers.</p>
+                          )}
+                          {columns.map((col) => (
+                            <FormField
+                              key={col}
+                              control={form.control}
+                              name={`columnMappings.${col}` as const}
+                              render={({ field }) => (
+                                <FormItem className="space-y-1 rounded-md border bg-background/70 p-2">
+                                  <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:items-center">
+                                    <FormLabel className="text-xs font-medium truncate">{col}</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        className="h-8 w-full min-w-0 text-xs"
+                                        value={field.value ?? ""}
+                                        onChange={field.onChange}
+                                        placeholder={`{{${varName || "source"}.${col.replace(/[^A-Za-z0-9_]/g, "_")}}}`}
+                                      />
+                                    </FormControl>
+                                  </div>
+                                </FormItem>
+                              )}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Delete Row ── */}
+                  {action === "delete" && (
+                    <div className="space-y-4">
+                      <FormField
+                        control={form.control}
+                        name="deleteRowNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Row Number to Delete</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="2  (row 1 is the header)"
+                                {...field}
+                                className="text-sm"
+                              />
+                            </FormControl>
+                            <span className="mt-1 block text-xs text-amber-600 dark:text-amber-400">
+                              ⚠️ This permanently deletes the entire row. Row&nbsp;1 is the header — avoid deleting it.
+                            </span>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
+
+                  {/* ── Clear Range ── */}
+                  {action === "clear" && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                      ⚠️ <strong>Clear Range</strong> erases all cell values in the configured range. Use the{" "}
+                      <em>Manual Range Override</em> in Advanced settings to target a specific area like{" "}
+                      <code className="rounded bg-amber-100 dark:bg-amber-900 px-1 font-mono">Sheet1!A2:Z</code>.
+                    </div>
+                  )}
+
+                  {/* ── Create Sheet Tab ── */}
+                  {action === "create_sheet" && (
+                    <div className="space-y-4">
+                      <FormField
+                        control={form.control}
+                        name="newSheetName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>New Sheet Tab Name</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="My New Sheet"
+                                {...field}
+                                className="text-sm"
+                              />
+                            </FormControl>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              A new tab will be added to the selected spreadsheet with this name. You can also use a template like{" "}
+                              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{`{{webhook.body.tabName}}`}</code>.
+                            </span>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
+
                   {action === "read" && (
                     <div className="space-y-4">
                       <div className="space-y-2">
@@ -1256,13 +1426,17 @@ export const GoogleSheetsDialog = ({
               </div>
 
               <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleSendTestRow}
-                >
-                  Append test row
-                </Button>
+                {action === "append" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleSendTestRow}
+                  >
+                    Append test row
+                  </Button>
+                ) : (
+                  <span />
+                )}
                 <Button type="submit">Save</Button>
               </DialogFooter>
             </form>
@@ -1272,6 +1446,3 @@ export const GoogleSheetsDialog = ({
     </>
   );
 };
-
-
-

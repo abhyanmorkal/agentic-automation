@@ -24,7 +24,7 @@ type GoogleSheetsNodeData = {
   spreadsheetId?: string;
   sheetTitle?: string;
   range?: string;
-  action?: "append" | "read";
+  action?: "append" | "read" | "update" | "delete" | "clear" | "create_sheet";
   credentialId?: string;
   variableName?: string;
   values?: string;
@@ -33,6 +33,9 @@ type GoogleSheetsNodeData = {
   readFilter?: { column: string; operator: string; value: string };
   readOutputMapping?: Record<string, string>;
   selectedResponseName?: string;
+  updateRowNumber?: string;
+  deleteRowNumber?: string;
+  newSheetName?: string;
   context?: WorkflowContext;
 };
 type GoogleSheetsNodeType = Node<GoogleSheetsNodeData>;
@@ -337,8 +340,17 @@ export const GoogleSheetsNode = memo(
       nodes,
     ]);
 
+    const ACTION_LABELS: Record<string, string> = {
+      append: "Add Row",
+      read: "Get Row(s)",
+      update: "Update Row",
+      delete: "Delete Row",
+      clear: "Clear Range",
+      create_sheet: "Create Sheet Tab",
+    };
+    const actionLabel = ACTION_LABELS[props.data?.action ?? "append"] ?? props.data?.action ?? "append";
     const description = props.data?.spreadsheetId
-      ? `${props.data.action ?? "append"} - ${props.data.range ?? ""}`
+      ? `${actionLabel} — ${props.data.sheetTitle || props.data.range || ""}`
       : "Not configured";
 
     return (
