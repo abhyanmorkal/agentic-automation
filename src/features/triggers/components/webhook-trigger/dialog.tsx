@@ -8,12 +8,10 @@ import {
   EyeIcon,
   EyeOffIcon,
   HistoryIcon,
-  InfoIcon,
   KeyIcon,
   Loader2Icon,
   RefreshCwIcon,
   WebhookIcon,
-  ZapIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -29,6 +27,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  buildWebhookFieldPaths,
+  buildWebhookSampleViews,
+  type WebhookFieldPath,
+  type WebhookSampleRaw,
+} from "@/features/triggers/components/webhook-trigger/formatters";
 import { useTriggerToken } from "@/features/triggers/hooks/use-trigger-token";
 
 type WebhookHistoryEntry = {
@@ -37,6 +41,9 @@ type WebhookHistoryEntry = {
   headers?: Record<string, string>;
   method?: string;
   query?: Record<string, string>;
+  parseType?: "json" | "form" | "multipart" | "text";
+  contentType?: string;
+  sizeBytes?: number;
 };
 
 type WebhookTriggerDialogData = {
@@ -95,6 +102,9 @@ export const WebhookTriggerDialog = ({
   const [responseFormat, setResponseFormat] = useState<
     "simple" | "advanced" | "raw"
   >("simple");
+  const [lastCapturedAt, setLastCapturedAt] = useState(
+    defaultValues?.lastSampleCapturedAt ?? "",
+  );
   const [sampleSimple, setSampleSimple] = useState<Record<
     string,
     unknown
@@ -114,6 +124,7 @@ export const WebhookTriggerDialog = ({
   const [sampleRaw, setSampleRaw] = useState<unknown | null>(
     defaultValues?.sampleResponseRaw ?? null,
   );
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [savedResponses, setSavedResponses] = useState<
     WebhookTriggerDialogData["savedResponses"] | undefined
   >(defaultValues?.savedResponses);
@@ -126,7 +137,18 @@ export const WebhookTriggerDialog = ({
   const webhookHistory = (defaultValues?.webhookHistory ??
     []) as WebhookHistoryEntry[];
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const baseUrl = useMemo(() => {
+    const configuredUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+    if (configuredUrl) {
+      return configuredUrl;
+    }
+
+    if (typeof window !== "undefined") {
+      return window.location.origin;
+    }
+
+    return "";
+  }, []);
 
   const webhookUrl = token
     ? `${baseUrl}/workflow/sendwebhookdata/${token}`
@@ -154,28 +176,50 @@ export const WebhookTriggerDialog = ({
   };
 
   const handleLoadHistoryEntry = (entry: WebhookHistoryEntry) => {
-    const body =
-      entry.body && typeof entry.body === "object"
-        ? (entry.body as Record<string, unknown>)
-        : {};
-    setSampleSimple(body);
-    setSampleAdvanced(body);
-    setSampleRaw(entry);
+    const raw: WebhookSampleRaw = {
+      body: entry.body,
+      headers: entry.headers ?? {},
+      method: entry.method ?? "POST",
+      query: entry.query ?? {},
+      receivedAt: entry.receivedAt,
+    };
+    const views = buildWebhookSampleViews(raw);
+    setSampleSimple(views.simple);
+    setSampleAdvanced(views.advanced as Record<string, unknown>);
+    setSampleRaw(views.raw);
     setResponseFormat("simple");
+    setLastCapturedAt(entry.receivedAt);
   };
 
   const handleSendTestPayload = async () => {
     setSendingTest(true);
     try {
-      await fetch(webhookUrl, {
+      JSON.parse(testPayload);
+
+      const response = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: testPayload,
       });
+
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast.error(
+          typeof json?.error === "string"
+            ? json.error
+            : "Failed to send test payload.",
+        );
+        return;
+      }
+
       toast.success(
         "Test payload sent. Click 'Load last received' to see the data.",
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        toast.error("Test payload must be valid JSON.");
+        return;
+      }
       toast.error("Failed to send test payload.");
     } finally {
       setSendingTest(false);
@@ -207,6 +251,11 @@ export const WebhookTriggerDialog = ({
       setSampleAdvanced(json.advanced ?? null);
       setSampleRaw(json.raw ?? null);
       setResponseFormat("simple");
+      setLastCapturedAt(
+        typeof json.lastSampleCapturedAt === "string"
+          ? json.lastSampleCapturedAt
+          : new Date().toISOString(),
+      );
 
       toast.success(
         options?.recapture
@@ -240,6 +289,46 @@ export const WebhookTriggerDialog = ({
 
     return sampleRaw;
   }, [sampleRaw]);
+  const sampleFieldPaths = useMemo<WebhookFieldPath[]>(() => {
+    if (!sampleRaw || typeof sampleRaw !== "object") {
+      return [];
+    }
+
+    return buildWebhookFieldPaths(sampleRaw as WebhookSampleRaw);
+  }, [sampleRaw]);
+
+  const sampleMeta = useMemo(() => {
+    if (!sampleRaw || typeof sampleRaw !== "object") {
+      return null;
+    }
+
+    const raw = sampleRaw as WebhookSampleRaw;
+    return {
+      method: raw.method ?? "POST",
+      parseType: raw.parseType?.toUpperCase() ?? null,
+      sizeLabel:
+        typeof raw.sizeBytes === "number"
+          ? raw.sizeBytes < 1024
+            ? `${raw.sizeBytes} B`
+            : `${(raw.sizeBytes / 1024).toFixed(1)} KB`
+          : null,
+      dedupeLabel: raw.dedupeSource
+        ? `Dedupe: ${raw.dedupeSource}`
+        : null,
+    };
+  }, [sampleRaw]);
+
+  const copyVariablePath = async (path: string) => {
+    const variable = `{{webhook.${path}}}`;
+    try {
+      await navigator.clipboard.writeText(variable);
+      setCopiedPath(path);
+      toast.success("Variable path copied");
+      setTimeout(() => setCopiedPath((current) => (current === path ? null : current)), 1500);
+    } catch {
+      toast.error("Failed to copy variable path");
+    }
+  };
 
   const handleSaveNamedResponse = async () => {
     if (!selectedResponse) {
@@ -288,20 +377,19 @@ export const WebhookTriggerDialog = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <WebhookIcon className="size-5 text-primary" />
             <DialogTitle>Webhook Trigger</DialogTitle>
           </div>
           <DialogDescription>
-            Connect any app that can send an HTTP POST and use the payload in
-            your next nodes.
+            Receive a POST request and use its payload in the next nodes.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="mt-3 grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-[0.95fr_1.05fr]">
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="webhook-description">Label (optional)</Label>
@@ -341,8 +429,11 @@ export const WebhookTriggerDialog = ({
               </div>
               <p className="text-xs text-muted-foreground">
                 {ready
-                  ? "Paste this URL into your app's webhook settings and send a POST request."
-                  : "Generating a signed webhook URL..."}
+                  ? "Paste this into your source app."
+                  : "Generating webhook URL..."}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Accepts JSON, form, multipart, and text payloads up to 1 MB.
               </p>
             </div>
 
@@ -390,72 +481,11 @@ export const WebhookTriggerDialog = ({
               </div>
               {webhookSecret && (
                 <div className="rounded-md border bg-muted/40 p-2 text-[11px] text-muted-foreground space-y-1">
-                  <p className="font-medium text-foreground">
-                    Required request header:
-                  </p>
+                  <p className="font-medium text-foreground">Required header</p>
                   <code className="block font-mono break-all">
                     X-Webhook-Signature: sha256=&lt;hmac-sha256&gt;
                   </code>
-                  <p>
-                    Requests without a valid signature will be rejected with
-                    401.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
-              <div className="flex items-center gap-1.5">
-                <InfoIcon className="size-3.5 text-muted-foreground" />
-                <h4 className="text-xs font-semibold">Quick steps</h4>
-              </div>
-              <ul className="text-xs text-muted-foreground space-y-0.5 list-disc list-inside">
-                <li>Add the URL above in your source app.</li>
-                <li>Send a test POST from your source app.</li>
-                <li>
-                  Click <span className="font-medium">Load last received</span>{" "}
-                  to see the data.
-                </li>
-              </ul>
-            </div>
-
-            <div className="rounded-md border bg-muted/40 p-3 space-y-2">
-              <div className="flex items-center gap-1.5">
-                <ZapIcon className="size-3.5 text-primary" />
-                <h4 className="text-xs font-semibold">Use in next nodes</h4>
-              </div>
-              {sampleSimple && Object.keys(sampleSimple).length > 0 ? (
-                <div className="space-y-1 text-[11px] text-muted-foreground">
-                  {Object.entries(sampleSimple)
-                    .slice(0, 8)
-                    .map(([key, value]) => (
-                      <div key={key} className="flex items-center gap-2">
-                        <code className="bg-background border px-1.5 py-0.5 rounded font-mono text-[11px] shrink-0">
-                          {`{{webhook.body.${key}}}`}
-                        </code>
-                        <span className="truncate leading-4 text-muted-foreground">
-                          {String(value).slice(0, 40)}
-                        </span>
-                      </div>
-                    ))}
-                  {Object.keys(sampleSimple).length > 8 && (
-                    <p className="text-[11px] text-muted-foreground pt-0.5">
-                      +{Object.keys(sampleSimple).length - 8} more fields
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-1 text-[11px] text-muted-foreground">
-                  <p className="text-muted-foreground">
-                    Load a webhook response above to see your actual fields
-                    here.
-                  </p>
-                  <div className="flex items-start gap-2 opacity-50">
-                    <code className="bg-background border px-1.5 py-0.5 rounded font-mono text-[11px]">
-                      {"{{webhook.body.email}}"}
-                    </code>
-                    <span className="leading-4">example</span>
-                  </div>
+                  <p>Compute HMAC-SHA256 from the raw request body using this secret.</p>
                 </div>
               )}
             </div>
@@ -492,37 +522,10 @@ export const WebhookTriggerDialog = ({
                     {sendingTest ? (
                       <Loader2Icon className="size-3 animate-spin" />
                     ) : null}
-                    {sendingTest ? "Sending…" : "Send POST to webhook URL"}
+                    {sendingTest ? "Sending..." : "Send POST to webhook URL"}
                   </Button>
                 </div>
               )}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Works with
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  "Razorpay",
-                  "WooCommerce",
-                  "Typeform",
-                  "Shopify",
-                  "GitHub",
-                  "Jotform",
-                  "Zapier",
-                  "Make.com",
-                  "Postman",
-                ].map((svc) => (
-                  <Badge
-                    key={svc}
-                    variant="secondary"
-                    className="text-xs font-normal"
-                  >
-                    {svc}
-                  </Badge>
-                ))}
-              </div>
             </div>
           </div>
 
@@ -532,19 +535,37 @@ export const WebhookTriggerDialog = ({
                 <span className="text-xs font-medium text-muted-foreground">
                   Webhook response
                 </span>
-                {defaultValues?.lastSampleCapturedAt && (
+                {lastCapturedAt && (
                   <span className="text-[11px] text-muted-foreground">
                     Last received:{" "}
-                    {new Date(
-                      defaultValues.lastSampleCapturedAt,
-                    ).toLocaleString()}
+                    {new Date(lastCapturedAt).toLocaleString()}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
+                <div className="flex items-center gap-2">
+                  {sampleMeta?.method && (
+                    <Badge variant="secondary" className="text-[10px] font-normal">
+                      {sampleMeta.method}
+                    </Badge>
+                  )}
+                  {sampleMeta?.parseType && (
+                    <Badge variant="secondary" className="text-[10px] font-normal">
+                      {sampleMeta.parseType}
+                    </Badge>
+                  )}
+                  {sampleMeta?.sizeLabel && (
+                    <Badge variant="secondary" className="text-[10px] font-normal">
+                      {sampleMeta.sizeLabel}
+                    </Badge>
+                  )}
+                  {sampleMeta?.dedupeLabel && (
+                    <Badge variant="secondary" className="text-[10px] font-normal">
+                      {sampleMeta.dedupeLabel}
+                    </Badge>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
                   size="sm"
                   disabled={loadingCapture}
                   onClick={() => handleCaptureSample()}
@@ -584,11 +605,31 @@ export const WebhookTriggerDialog = ({
                     <button
                       key={`${entry.receivedAt}-${entry.method ?? "unknown"}`}
                       type="button"
-                      className="w-full text-left px-1.5 py-0.5 rounded text-[11px] font-mono text-muted-foreground hover:bg-background hover:text-foreground transition-colors"
+                      className="w-full text-left px-1.5 py-1 rounded text-[11px] text-muted-foreground hover:bg-background hover:text-foreground transition-colors"
                       onClick={() => handleLoadHistoryEntry(entry)}
                     >
-                      {i === 0 ? "Latest · " : `${i + 1} · `}
-                      {new Date(entry.receivedAt).toLocaleString()}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono">
+                          {i === 0 ? "Latest" : `Event ${i + 1}`}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <Badge variant="secondary" className="text-[10px] font-normal">
+                            {entry.method ?? "POST"}
+                          </Badge>
+                          {entry.parseType && (
+                            <Badge
+                              variant="secondary"
+                              className="text-[10px] font-normal"
+                            >
+                              {entry.parseType.toUpperCase()}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                        {new Date(entry.receivedAt).toLocaleString()}
+                        {entry.sizeBytes ? ` • ${entry.sizeBytes} B` : ""}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -617,12 +658,15 @@ export const WebhookTriggerDialog = ({
                 ))}
               </div>
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              `Simple` shows easy fields. `Advanced` shows parsed request data. `Raw` shows the stored payload.
+            </p>
 
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
                 {selectedResponse
-                  ? "Response loaded. Use it to map fields in the next node."
-                  : 'No webhook received yet. Send a POST to the URL above, then click "Load last received".'}
+                  ? "Use these fields in the next node."
+                  : 'No webhook received yet. Send a POST, then click "Load last received".'}
               </p>
 
               {responseFormat === "simple" && (
@@ -652,13 +696,56 @@ export const WebhookTriggerDialog = ({
                           </div>
                         ))}
                       </div>
+                      <div className="rounded-md border bg-background/70 p-2 text-[11px] text-muted-foreground">
+                        Example: <code className="font-mono">{`{{webhook.body.${Object.keys(sampleSimple)[0]}}}`}</code>
+                      </div>
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      No fields found yet. Capture a response first to see
-                      label/value pairs.
+                      No fields yet. Capture a response to preview them here.
                     </p>
                   )}
+                </div>
+              )}
+
+              {sampleFieldPaths.length > 0 && (
+                <div className="rounded-md border bg-background/70 p-2 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-foreground">
+                      Field paths
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Copy a path for mapping
+                    </span>
+                  </div>
+                  <div className="max-h-40 space-y-1 overflow-y-auto pr-1">
+                    {sampleFieldPaths.slice(0, 24).map((field) => (
+                      <div
+                        key={field.path}
+                        className="flex items-center gap-2 rounded border bg-muted/30 px-2 py-1.5"
+                      >
+                        <code className="min-w-0 flex-1 truncate font-mono text-[11px]">
+                          {`{{webhook.${field.path}}}`}
+                        </code>
+                        <span className="max-w-32 truncate text-[11px] text-muted-foreground">
+                          {field.valuePreview}
+                        </span>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 shrink-0"
+                          onClick={() => copyVariablePath(field.path)}
+                        >
+                          {copiedPath === field.path ? (
+                            <CheckIcon className="size-3.5 text-green-600" />
+                          ) : (
+                            <CopyIcon className="size-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -709,18 +796,18 @@ export const WebhookTriggerDialog = ({
                     onClick={handleSaveNamedResponse}
                     disabled={saving || !savingName.trim()}
                   >
-                    {saving ? "Saving…" : "Save"}
+                    {saving ? "Saving..." : "Save"}
                   </Button>
                 </div>
               </div>
               {savedResponses && Object.keys(savedResponses).length > 0 && (
                 <div className="space-y-1">
                   <p className="text-[11px] text-muted-foreground">
-                    Saved responses can be used in next nodes as{" "}
+                    Reuse in next nodes as{" "}
                     <code className="bg-background border px-1 rounded font-mono text-[11px]">
                       {`{{webhook.savedResponses['${Object.keys(savedResponses)[0]}']}}`}
                     </code>
-                    . Click a name to overwrite it.
+                    .
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {Object.keys(savedResponses).map((name) => (

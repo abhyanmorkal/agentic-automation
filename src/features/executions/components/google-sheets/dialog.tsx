@@ -2,12 +2,14 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  ChevronsUpDownIcon,
   RefreshCwIcon,
   Settings2Icon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import z from "zod";
@@ -22,6 +24,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +50,11 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -51,6 +66,7 @@ import { useCredentialsByType } from "@/features/credentials/hooks/use-credentia
 import type { VariableTree } from "@/features/executions/lib/variable-tree";
 import { CredentialType } from "@/generated/prisma";
 import { getRequiredConnectorForCredentialType } from "@/integrations/core/registry";
+import { cn } from "@/lib/utils";
 import {
   fetchGoogleSheetColumns,
   fetchGoogleSheets,
@@ -58,16 +74,27 @@ import {
 } from "./actions";
 import type { UpstreamSource } from "./types";
 
+/**
+ * Sanitize a raw string into a valid JS identifier:
+ * replace spaces/invalid chars with underscores, prefix leading digits with _.
+ */
+function sanitizeVariableName(raw: string): string {
+  if (!raw) return "";
+  let result = raw.replace(/[^A-Za-z0-9_$]/g, "_");
+  if (/^[0-9]/.test(result)) result = "_" + result;
+  return result;
+}
+
 const formSchema = z.object({
   variableName: z
     .string()
     .min(1, "Variable name is required")
-    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, "Variable name must start with a letter, _ or $ and contain only letters, digits, _ or $"),
   credentialId: z.string().min(1, "Credential is required"),
   spreadsheetId: z.string().min(1, "Spreadsheet is required"),
   sheetTitle: z.string().min(1, "Sheet is required"),
   range: z.string().min(1, "Range is required"),
-  action: z.enum(["append", "read"]),
+  action: z.enum(["append", "read", "update", "delete", "clear", "create_sheet"]),
   values: z.string().optional(),
   columnMappings: z.record(z.string(), z.string().optional()).optional(),
   sourceVariable: z.string().min(1, "Source variable is required"),
@@ -79,6 +106,9 @@ const formSchema = z.object({
       value: z.string().optional(),
     })
     .optional(),
+  updateRowNumber: z.string().optional(),
+  deleteRowNumber: z.string().optional(),
+  newSheetName: z.string().optional(),
   readOutputMapping: z.record(z.string(), z.string()).optional(),
 });
 
@@ -111,6 +141,86 @@ interface Props {
   >;
   activeResponseName?: string;
   allResponseNames?: string[];
+}
+
+type SearchableOption = {
+  value: string;
+  label: string;
+  keywords?: string;
+};
+
+function SearchablePicker({
+  value,
+  onChange,
+  options,
+  placeholder,
+  searchPlaceholder,
+  emptyLabel,
+  disabled,
+  loading,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: SearchableOption[];
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyLabel: string;
+  disabled?: boolean;
+  loading?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          className="w-full justify-between overflow-hidden"
+        >
+          <span className="truncate text-left">
+            {selected?.label || placeholder}
+          </span>
+          <ChevronsUpDownIcon className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0"
+        align="start"
+      >
+        <Command>
+          <CommandInput placeholder={searchPlaceholder} />
+          <CommandList>
+            <CommandEmpty>{loading ? "Loading..." : emptyLabel}</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  key={option.value}
+                  value={`${option.label} ${option.keywords ?? ""}`}
+                  onSelect={() => {
+                    onChange(option.value);
+                    setOpen(false);
+                  }}
+                >
+                  <CheckIcon
+                    className={cn(
+                      "size-4",
+                      value === option.value ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span className="truncate">{option.label}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export const GoogleSheetsDialog = ({
@@ -154,6 +264,9 @@ export const GoogleSheetsDialog = ({
         operator: "equals",
         value: "",
       },
+      updateRowNumber: defaultValues.updateRowNumber ?? "",
+      deleteRowNumber: defaultValues.deleteRowNumber ?? "",
+      newSheetName: defaultValues.newSheetName ?? "",
       readOutputMapping: defaultValues.readOutputMapping ?? {},
     },
   });
@@ -178,6 +291,9 @@ export const GoogleSheetsDialog = ({
           operator: "equals",
           value: "",
         },
+        updateRowNumber: defaultValues.updateRowNumber ?? "",
+        deleteRowNumber: defaultValues.deleteRowNumber ?? "",
+        newSheetName: defaultValues.newSheetName ?? "",
         readOutputMapping: defaultValues.readOutputMapping ?? {},
       });
   }, [open, defaultValues, form, upstreamSources]);
@@ -195,6 +311,23 @@ export const GoogleSheetsDialog = ({
     testValues?: string[][];
   } | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const spreadsheetOptions = useMemo<SearchableOption[]>(
+    () =>
+      spreadsheets.map((sheet) => ({
+        value: sheet.id,
+        label: sheet.name,
+        keywords: sheet.id,
+      })),
+    [spreadsheets],
+  );
+  const sheetOptions = useMemo<SearchableOption[]>(
+    () =>
+      sheets.map((sheet) => ({
+        value: sheet.title,
+        label: sheet.title,
+      })),
+    [sheets],
+  );
 
   // Embedded Google OAuth popup flow (similar to Facebook)
   useEffect(() => {
@@ -534,11 +667,11 @@ export const GoogleSheetsDialog = ({
         </AlertDialogContent>
       </AlertDialog>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-full max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Google Sheets Configuration</DialogTitle>
+            <DialogTitle>Google Sheets</DialogTitle>
             <DialogDescription>
-              Append new rows or read data from a Google Sheet.
+              Choose a spreadsheet, choose a sheet, then map your data.
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
@@ -548,11 +681,11 @@ export const GoogleSheetsDialog = ({
                   "Please fix the highlighted fields before saving this Google Sheets node.",
                 );
               })}
-              className="mt-4 space-y-6"
+              className="mt-4 space-y-5"
             >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] xl:gap-6">
                 {/* Left column: core configuration */}
-                <div className="space-y-5">
+                <div className="min-w-0 space-y-5">
                   <FormField
                     control={form.control}
                     name="variableName"
@@ -560,8 +693,19 @@ export const GoogleSheetsDialog = ({
                       <FormItem>
                         <FormLabel>Variable Name</FormLabel>
                         <FormControl>
-                          <Input placeholder="mySheets" {...field} />
+                          <Input
+                            placeholder="mySheets"
+                            {...field}
+                            onChange={(e) => {
+                              field.onChange(sanitizeVariableName(e.target.value));
+                            }}
+                          />
                         </FormControl>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Output reference:{" "}
+                          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{`{{${varName || "mySheets"}}}`}</code>
+                          . Spaces &amp; special characters are auto-replaced with underscores.
+                        </span>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -573,14 +717,14 @@ export const GoogleSheetsDialog = ({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>{googleConnector.credentialLabel}</FormLabel>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-col gap-2 sm:flex-row">
                           <Select
                             onValueChange={field.onChange}
                             value={field.value}
                             disabled={isLoading || !credentials?.length}
                           >
                             <FormControl>
-                              <SelectTrigger className="min-w-[220px]">
+                              <SelectTrigger className="w-full min-w-0">
                                 <SelectValue
                                   placeholder={
                                     googleConnector.credentialPlaceholder
@@ -629,8 +773,12 @@ export const GoogleSheetsDialog = ({
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="append">Add New Row</SelectItem>
-                            <SelectItem value="read">Get Row(s)</SelectItem>
+                            <SelectItem value="append">➕ Add New Row</SelectItem>
+                            <SelectItem value="read">🔎 Get Row(s)</SelectItem>
+                            <SelectItem value="update">✏️ Update Row</SelectItem>
+                            <SelectItem value="delete">🗑️ Delete Row</SelectItem>
+                            <SelectItem value="clear">🧹 Clear Range</SelectItem>
+                            <SelectItem value="create_sheet">📋 Create Sheet Tab</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -645,26 +793,22 @@ export const GoogleSheetsDialog = ({
                       <FormItem>
                         <FormLabel>Spreadsheet</FormLabel>
                         <div className="flex items-center gap-2">
-                          <Select
-                            onValueChange={field.onChange}
-                            value={field.value}
-                            disabled={
-                              loadingSpreadsheets || !watchedCredentialId
-                            }
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select spreadsheet" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {spreadsheets.map((s) => (
-                                <SelectItem key={s.id} value={s.id}>
-                                  {s.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <div className="min-w-0 flex-1">
+                            <SearchablePicker
+                              value={field.value}
+                              onChange={field.onChange}
+                              options={spreadsheetOptions}
+                              placeholder={
+                                watchedCredentialId
+                                  ? "Select spreadsheet"
+                                  : "Connect Google first"
+                              }
+                              searchPlaceholder="Search spreadsheet..."
+                              emptyLabel="No spreadsheets found"
+                              disabled={!watchedCredentialId}
+                              loading={loadingSpreadsheets}
+                            />
+                          </div>
                           <Button
                             type="button"
                             variant="outline"
@@ -683,9 +827,17 @@ export const GoogleSheetsDialog = ({
                                 .finally(() => setLoadingSpreadsheets(false));
                             }}
                           >
-                            ↻
+                            <RefreshCwIcon
+                              className={cn(
+                                "size-4",
+                                loadingSpreadsheets && "animate-spin",
+                              )}
+                            />
                           </Button>
                         </div>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Search by spreadsheet name instead of scrolling long lists.
+                        </span>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -698,24 +850,22 @@ export const GoogleSheetsDialog = ({
                       <FormItem>
                         <FormLabel>Sheet</FormLabel>
                         <div className="flex items-center gap-2">
-                          <Select
-                            onValueChange={field.onChange}
-                            value={field.value}
-                            disabled={loadingSheets || !watchedSpreadsheetId}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select sheet" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {sheets.map((s) => (
-                                <SelectItem key={s.title} value={s.title}>
-                                  {s.title}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <div className="min-w-0 flex-1">
+                            <SearchablePicker
+                              value={field.value}
+                              onChange={field.onChange}
+                              options={sheetOptions}
+                              placeholder={
+                                watchedSpreadsheetId
+                                  ? "Select sheet"
+                                  : "Select spreadsheet first"
+                              }
+                              searchPlaceholder="Search sheet..."
+                              emptyLabel="No sheets found"
+                              disabled={!watchedSpreadsheetId}
+                              loading={loadingSheets}
+                            />
+                          </div>
                           <Button
                             type="button"
                             variant="outline"
@@ -740,9 +890,17 @@ export const GoogleSheetsDialog = ({
                                 .finally(() => setLoadingSheets(false));
                             }}
                           >
-                            ↻
+                            <RefreshCwIcon
+                              className={cn(
+                                "size-4",
+                                loadingSheets && "animate-spin",
+                              )}
+                            />
                           </Button>
                         </div>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Search by sheet tab name when a spreadsheet has many tabs.
+                        </span>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -750,7 +908,7 @@ export const GoogleSheetsDialog = ({
                 </div>
 
                 {/* Right column: mapping & advanced controls */}
-                <div className="space-y-5">
+                <div className="min-w-0 space-y-5">
                   <FormField
                     control={form.control}
                     name="sourceVariable"
@@ -874,7 +1032,7 @@ export const GoogleSheetsDialog = ({
                       <div className="border rounded-md p-3 max-h-72 overflow-auto space-y-2 bg-muted/40">
                         {loadingColumns && (
                           <p className="text-xs text-muted-foreground">
-                            Loading columns…
+                            Loading columns...
                           </p>
                         )}
                         {!loadingColumns && columns.length === 0 && (
@@ -889,8 +1047,8 @@ export const GoogleSheetsDialog = ({
                             control={form.control}
                             name={`columnMappings.${col}` as const}
                             render={({ field }) => (
-                              <FormItem className="space-y-1.5">
-                                <div className="grid grid-cols-[160px,1fr] items-center gap-2">
+                              <FormItem className="space-y-1.5 rounded-md border bg-background/70 p-2">
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:items-center">
                                   <FormLabel className="text-xs font-medium truncate">
                                     {col}
                                   </FormLabel>
@@ -900,7 +1058,7 @@ export const GoogleSheetsDialog = ({
                                       onValueChange={field.onChange}
                                       disabled={!hasSavedResponseFields}
                                     >
-                                      <SelectTrigger>
+                                      <SelectTrigger className="w-full min-w-0">
                                         <SelectValue
                                           placeholder={
                                             hasSavedResponseFields
@@ -913,7 +1071,7 @@ export const GoogleSheetsDialog = ({
                                         {currentSavedResponseFields.map((f) => (
                                           <SelectItem key={f.key} value={f.key}>
                                             {f.label}
-                                            {f.example ? ` — ${f.example}` : ""}
+                                            {f.example ? ` - ${f.example}` : ""}
                                           </SelectItem>
                                         ))}
                                       </SelectContent>
@@ -934,11 +1092,146 @@ export const GoogleSheetsDialog = ({
                     </div>
                   )}
 
+                  {/* ── Update Row ── */}
+                  {action === "update" && (
+                    <div className="space-y-4">
+                      <FormField
+                        control={form.control}
+                        name="updateRowNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Row Number to Update</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="2  (row 1 is the header)"
+                                {...field}
+                                className="text-sm"
+                              />
+                            </FormControl>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              Row&nbsp;1 is typically the header row. You can also use a template like{" "}
+                              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{`{{webhook.body.rowNumber}}`}</code>.
+                            </span>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <FormLabel>Column values to update</FormLabel>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            disabled={loadingColumns || !watchedSheetTitle}
+                            onClick={handleRefreshColumns}
+                            title="Refresh Columns"
+                          >
+                            <RefreshCwIcon className={`h-3 w-3 ${loadingColumns ? "animate-spin" : ""}`} />
+                            <span className="sr-only">Refresh Columns</span>
+                          </Button>
+                        </div>
+                        <div className="border rounded-md p-3 max-h-60 overflow-auto space-y-2 bg-muted/40">
+                          {loadingColumns && <p className="text-xs text-muted-foreground">Loading columns...</p>}
+                          {!loadingColumns && columns.length === 0 && (
+                            <p className="text-xs text-muted-foreground">Select a spreadsheet and sheet to load column headers.</p>
+                          )}
+                          {columns.map((col) => (
+                            <FormField
+                              key={col}
+                              control={form.control}
+                              name={`columnMappings.${col}` as const}
+                              render={({ field }) => (
+                                <FormItem className="space-y-1 rounded-md border bg-background/70 p-2">
+                                  <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:items-center">
+                                    <FormLabel className="text-xs font-medium truncate">{col}</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        className="h-8 w-full min-w-0 text-xs"
+                                        value={field.value ?? ""}
+                                        onChange={field.onChange}
+                                        placeholder={`{{${varName || "source"}.${col.replace(/[^A-Za-z0-9_]/g, "_")}}}`}
+                                      />
+                                    </FormControl>
+                                  </div>
+                                </FormItem>
+                              )}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Delete Row ── */}
+                  {action === "delete" && (
+                    <div className="space-y-4">
+                      <FormField
+                        control={form.control}
+                        name="deleteRowNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Row Number to Delete</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="2  (row 1 is the header)"
+                                {...field}
+                                className="text-sm"
+                              />
+                            </FormControl>
+                            <span className="mt-1 block text-xs text-amber-600 dark:text-amber-400">
+                              ⚠️ This permanently deletes the entire row. Row&nbsp;1 is the header — avoid deleting it.
+                            </span>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
+
+                  {/* ── Clear Range ── */}
+                  {action === "clear" && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                      ⚠️ <strong>Clear Range</strong> erases all cell values in the configured range. Use the{" "}
+                      <em>Manual Range Override</em> in Advanced settings to target a specific area like{" "}
+                      <code className="rounded bg-amber-100 dark:bg-amber-900 px-1 font-mono">Sheet1!A2:Z</code>.
+                    </div>
+                  )}
+
+                  {/* ── Create Sheet Tab ── */}
+                  {action === "create_sheet" && (
+                    <div className="space-y-4">
+                      <FormField
+                        control={form.control}
+                        name="newSheetName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>New Sheet Tab Name</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="My New Sheet"
+                                {...field}
+                                className="text-sm"
+                              />
+                            </FormControl>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              A new tab will be added to the selected spreadsheet with this name. You can also use a template like{" "}
+                              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{`{{webhook.body.tabName}}`}</code>.
+                            </span>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
+
                   {action === "read" && (
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <FormLabel>Find row where</FormLabel>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
                           <FormField
                             control={form.control}
                             name="readFilter.column"
@@ -1034,7 +1327,7 @@ export const GoogleSheetsDialog = ({
                         <div className="border rounded-md p-3 max-h-60 overflow-auto space-y-2 bg-muted/40">
                           {loadingColumns && (
                             <p className="text-xs text-muted-foreground">
-                              Loading columns…
+                              Loading columns...
                             </p>
                           )}
                           {!loadingColumns && columns.length === 0 && (
@@ -1049,14 +1342,14 @@ export const GoogleSheetsDialog = ({
                               control={form.control}
                               name={`readOutputMapping.${col}` as const}
                               render={({ field }) => (
-                                <FormItem className="space-y-1">
-                                  <div className="grid grid-cols-[160px,1fr] items-center gap-2">
+                              <FormItem className="space-y-1 rounded-md border bg-background/70 p-2">
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:items-center">
                                     <FormLabel className="text-xs font-medium truncate">
                                       {col}
                                     </FormLabel>
                                     <FormControl>
                                       <Input
-                                        className="h-8 text-xs"
+                                        className="h-8 w-full min-w-0 text-xs"
                                         value={field.value ?? ""}
                                         onChange={field.onChange}
                                         placeholder={col
@@ -1132,14 +1425,18 @@ export const GoogleSheetsDialog = ({
                 </div>
               </div>
 
-              <DialogFooter className="flex items-center justify-between">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleSendTestRow}
-                >
-                  Append test row to sheet
-                </Button>
+              <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                {action === "append" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleSendTestRow}
+                  >
+                    Append test row
+                  </Button>
+                ) : (
+                  <span />
+                )}
                 <Button type="submit">Save</Button>
               </DialogFooter>
             </form>

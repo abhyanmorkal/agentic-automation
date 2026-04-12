@@ -101,11 +101,14 @@ type GoogleSheetsData = {
   sheetTitle?: string;
   range?: string;
   values?: string;
-  action?: "append" | "read";
+  action?: "append" | "read" | "update" | "delete" | "clear" | "create_sheet";
   sourceVariable?: string;
   columnMappings?: Record<string, string | undefined>;
   readFilter?: { column: string; operator: string; value: string };
   readOutputMapping?: Record<string, string>;
+  updateRowNumber?: string;
+  deleteRowNumber?: string;
+  newSheetName?: string;
 };
 
 function matchesFilter(
@@ -244,6 +247,186 @@ export const googleSheetsExecutor: NodeExecutor<GoogleSheetsData> = async ({
             totalRows: dataRows.length,
             headers,
             range,
+          },
+        };
+      }
+
+      // ── Update Row ──────────────────────────────────────────────────────────
+      if (action === "update") {
+        const rawRowNum = resolveTemplateValues(
+          data.updateRowNumber ?? "",
+          context as Record<string, unknown>,
+        );
+        const rowNum = parseInt(rawRowNum, 10);
+        if (!rawRowNum || isNaN(rowNum) || rowNum < 1) {
+          throw new NonRetriableError(
+            "Google Sheets node: A valid row number is required for Update Row",
+          );
+        }
+
+        // Fetch headers so we can build the value array in column order
+        const headersResp = await ky
+          .get(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range + "!1:1")}`,
+            { headers: { Authorization: `Bearer ${accessToken}` } },
+          )
+          .json<{ values?: string[][] }>()
+          .catch(parseGoogleApiError);
+
+        const headers: string[] = headersResp.values?.[0] ?? [];
+        const mappings = data.columnMappings ?? {};
+
+        // Build a row array in header order; resolve any template values
+        const rowValues = headers.map((col) => {
+          const tpl = mappings[col];
+          if (!tpl) return null; // null = don't overwrite this cell
+          return resolveTemplateValues(tpl, context as Record<string, unknown>);
+        });
+
+        // Use a named range like Sheet1!A5:Z5
+        const sheet = range.includes("!") ? range.split("!")[0] : range;
+        const updateRange = `${sheet}!A${rowNum}:${String.fromCharCode(65 + headers.length - 1)}${rowNum}`;
+
+        const updResp = await ky
+          .put(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(updateRange)}?valueInputOption=USER_ENTERED`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              json: { values: [rowValues.map((v) => v ?? "")] },
+            },
+          )
+          .json<{ updatedRange: string; updatedRows: number }>()
+          .catch(parseGoogleApiError);
+
+        return {
+          ...context,
+          [variableName]: {
+            updatedRange: updResp.updatedRange,
+            updatedRows: updResp.updatedRows,
+            rowNumber: rowNum,
+          },
+        };
+      }
+
+      // ── Delete Row ──────────────────────────────────────────────────────────
+      if (action === "delete") {
+        const rawRowNum = resolveTemplateValues(
+          data.deleteRowNumber ?? "",
+          context as Record<string, unknown>,
+        );
+        const rowNum = parseInt(rawRowNum, 10);
+        if (!rawRowNum || isNaN(rowNum) || rowNum < 1) {
+          throw new NonRetriableError(
+            "Google Sheets node: A valid row number is required for Delete Row",
+          );
+        }
+
+        // Get sheetId (the internal numeric ID, not the title)
+        const metaResp = await ky
+          .get(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`,
+            { headers: { Authorization: `Bearer ${accessToken}` } },
+          )
+          .json<{ sheets: { properties: { sheetId: number; title: string } }[] }>()
+          .catch(parseGoogleApiError);
+
+        const sheet = range.includes("!") ? range.split("!")[0] : range;
+        const sheetMeta = metaResp.sheets.find(
+          (s) => s.properties.title === sheet,
+        );
+        if (!sheetMeta) {
+          throw new NonRetriableError(
+            `Google Sheets node: Sheet "${sheet}" not found in spreadsheet`,
+          );
+        }
+
+        await ky
+          .post(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              json: {
+                requests: [
+                  {
+                    deleteDimension: {
+                      range: {
+                        sheetId: sheetMeta.properties.sheetId,
+                        dimension: "ROWS",
+                        startIndex: rowNum - 1,
+                        endIndex: rowNum,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          )
+          .json()
+          .catch(parseGoogleApiError);
+
+        return {
+          ...context,
+          [variableName]: {
+            deletedRow: rowNum,
+            spreadsheetId,
+          },
+        };
+      }
+
+      // ── Clear Range ─────────────────────────────────────────────────────────
+      if (action === "clear") {
+        await ky
+          .post(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`,
+            { headers: { Authorization: `Bearer ${accessToken}` }, json: {} },
+          )
+          .json()
+          .catch(parseGoogleApiError);
+
+        return {
+          ...context,
+          [variableName]: {
+            clearedRange: range,
+            spreadsheetId,
+          },
+        };
+      }
+
+      // ── Create Sheet Tab ────────────────────────────────────────────────────
+      if (action === "create_sheet") {
+        const newTitle = resolveTemplateValues(
+          data.newSheetName ?? "",
+          context as Record<string, unknown>,
+        ).trim();
+        if (!newTitle) {
+          throw new NonRetriableError(
+            "Google Sheets node: A sheet tab name is required for Create Sheet Tab",
+          );
+        }
+
+        const createResp = await ky
+          .post(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              json: {
+                requests: [{ addSheet: { properties: { title: newTitle } } }],
+              },
+            },
+          )
+          .json<{
+            replies: { addSheet?: { properties: { sheetId: number; title: string } } }[];
+          }>()
+          .catch(parseGoogleApiError);
+
+        const created = createResp.replies[0]?.addSheet?.properties;
+
+        return {
+          ...context,
+          [variableName]: {
+            createdSheetTitle: created?.title ?? newTitle,
+            createdSheetId: created?.sheetId,
+            spreadsheetId,
           },
         };
       }
