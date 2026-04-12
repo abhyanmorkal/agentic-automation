@@ -5,6 +5,17 @@ import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
 import { decodeTriggerToken } from "@/lib/trigger-token";
 
+const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
+const DEDUPE_HEADER_CANDIDATES = [
+  "x-event-id",
+  "x-request-id",
+  "x-webhook-id",
+  "x-shopify-webhook-id",
+  "x-github-delivery",
+  "x-razorpay-event-id",
+  "stripe-signature",
+] as const;
+
 async function parseRequestBody(
   rawBody: Buffer,
   contentType: string,
@@ -15,11 +26,13 @@ async function parseRequestBody(
       return {
         type: "json" as const,
         body: JSON.parse(rawBody.toString("utf8")) as unknown,
+        parseError: null,
       };
     } catch {
       return {
         type: "json" as const,
-        body: {} as unknown,
+        body: null as unknown,
+        parseError: "Invalid JSON body",
       };
     }
   }
@@ -33,6 +46,7 @@ async function parseRequestBody(
     return {
       type: "form" as const,
       body,
+      parseError: null,
     };
   }
 
@@ -64,6 +78,7 @@ async function parseRequestBody(
       type: "multipart" as const,
       body,
       files,
+      parseError: null,
     };
   }
 
@@ -72,6 +87,7 @@ async function parseRequestBody(
   return {
     type: "text" as const,
     body: text ? { raw: text } : {},
+    parseError: null,
   };
 }
 
@@ -118,6 +134,15 @@ export async function POST(
 
     // Read raw body once so we can verify HMAC before parsing
     const rawBody = Buffer.from(await request.arrayBuffer());
+    if (rawBody.byteLength > MAX_WEBHOOK_BODY_BYTES) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Webhook payload too large. Limit is 1 MB.",
+        },
+        { status: 413 },
+      );
+    }
 
     // HMAC signature verification (if a secret is configured)
     const nodeData = (node.data ?? {}) as Record<string, unknown>;
@@ -158,6 +183,31 @@ export async function POST(
     const contentType = request.headers.get("content-type") ?? "";
     const parsed = await parseRequestBody(rawBody, contentType, request);
 
+    if (parsed.parseError) {
+      return NextResponse.json(
+        { success: false, error: parsed.parseError },
+        { status: 400 },
+      );
+    }
+
+    const dedupeHeader = DEDUPE_HEADER_CANDIDATES.find((header) =>
+      request.headers.has(header),
+    );
+    const dedupeKey = dedupeHeader ? request.headers.get(dedupeHeader) : null;
+    const recentEventIds = Array.isArray(nodeData.recentEventIds)
+      ? (nodeData.recentEventIds as Array<{ key?: string; seenAt?: string }>)
+      : [];
+
+    if (
+      dedupeKey &&
+      recentEventIds.some((entry) => typeof entry?.key === "string" && entry.key === dedupeKey)
+    ) {
+      return NextResponse.json(
+        { success: true, duplicate: true, dedupeKey },
+        { status: 200 },
+      );
+    }
+
     const webhookData: Record<string, unknown> = {
       body: parsed.body,
       headers: Object.fromEntries(request.headers.entries()),
@@ -165,6 +215,11 @@ export async function POST(
       url: url.toString(),
       path: url.pathname,
       query,
+      parseType: parsed.type,
+      contentType,
+      sizeBytes: rawBody.byteLength,
+      dedupeKey,
+      dedupeSource: dedupeHeader ?? null,
       receivedAt: new Date().toISOString(),
     };
 
@@ -182,6 +237,14 @@ export async function POST(
       sampleResponseRaw: webhookData,
       lastSampleCapturedAt: new Date().toISOString(),
       webhookHistory,
+      recentEventIds: dedupeKey
+        ? [
+            { key: dedupeKey, seenAt: new Date().toISOString() },
+            ...recentEventIds.filter(
+              (entry) => typeof entry?.key === "string" && entry.key !== dedupeKey,
+            ),
+          ].slice(0, 50)
+        : recentEventIds,
     };
 
     await prisma.node.update({

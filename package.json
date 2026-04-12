@@ -6,7 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "test": "tsx --test src/inngest/execution-scheduler.test.ts src/lib/oauth-state.test.ts src/lib/trigger-token.test.ts src/lib/webhook-security.test.ts",
+    "test": "tsx --test src/inngest/execution-scheduler.test.ts src/lib/oauth-state.test.ts src/lib/trigger-token.test.ts src/lib/webhook-security.test.ts src/features/triggers/components/webhook-trigger/formatters.test.ts",
     "lint": "biome check",
     "ngrok:dev": "dotenv -- ngrok http --url=$NGROK_URL 3000",
     "format": "biome format --write",
