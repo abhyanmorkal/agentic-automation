@@ -142,7 +142,7 @@ export const GoogleSheetsNode = memo(
             NODE_TYPE_LABELS[nodeType] ?? nodeType.replace(/_/g, " ");
           const nodeData = srcNode.data as Record<string, unknown> | undefined;
 
-          // Extract saved response names — handle both Webhook (savedResponses)
+          // Extract saved response names - handle both Webhook (savedResponses)
           // and Facebook Lead (sampleResponseSimple/sampleResponseAdvanced) patterns
           const saved = nodeData?.savedResponses as
             | Record<string, unknown>
@@ -173,7 +173,7 @@ export const GoogleSheetsNode = memo(
             (nodeData?.pageName as string) ||
             "";
           const displayLabel = nodeName
-            ? `${label} — ${nodeName}`
+            ? `${label} - ${nodeName}`
             : `${label} (${srcNode.id.slice(-6)})`;
 
           sources.push({
@@ -338,7 +338,7 @@ export const GoogleSheetsNode = memo(
     ]);
 
     const description = props.data?.spreadsheetId
-      ? `${props.data.action ?? "append"} · ${props.data.range ?? ""}`
+      ? `${props.data.action ?? "append"} - ${props.data.range ?? ""}`
       : "Not configured";
 
     return (
@@ -371,3 +371,4 @@ export const GoogleSheetsNode = memo(
 );
 
 GoogleSheetsNode.displayName = "GoogleSheetsNode";
+
